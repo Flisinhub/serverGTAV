@@ -1,5 +1,17 @@
 Duo.motorPool = [-22.3, -1096.9, 26.67]
 Duo.parking = [[-17.7, -1091.6, 26.67, 69], [-16.3, -1088.0, 26.67, 69]]
+Duo.hq = [
+  { tab: 'contracts', name: 'Tablón de encargos', at: Duo.base, color: [76, 173, 255],
+    props: [['prop_noticeboard_01', -44.1, -1097.25, 25.46, 70]] },
+  { tab: 'operations', name: 'Mesa de operaciones', at: [-42.9, -1102.2, 26.42], color: [176, 220, 105],
+    props: [['prop_table_03', -44.35, -1102.85, 25.46, 70],
+      ['prop_worklight_03b', -45.10, -1103.95, 25.46, 55]] },
+  { tab: 'garage', name: 'Garaje y taller', at: Duo.motorPool, color: [222, 169, 75],
+    props: [['prop_toolchest_05', -24.05, -1098.52, 25.67, 70],
+      ['prop_worklight_03b', -23.4, -1099.9, 25.67, 55]] },
+  { tab: 'shop', name: 'Almacén de suministros', at: Duo.shop, color: [80, 215, 143],
+    props: [['prop_boxpile_06b', -49.57, -1093.56, 25.46, 70]] }
+]
 Duo.cars = {
   blista: { name: 'Dinka Blista', kind: 'Urbano', price: 0 },
   sultan: { name: 'Karin Sultan', kind: 'Deportivo · tracción total', price: 1550 },

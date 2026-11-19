@@ -1,0 +1,58 @@
+.welcome-guide {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding: clamp(18px, 3vw, 30px);
+  border: 1px solid #4b624c;
+  border-radius: 10px;
+  background: linear-gradient(127deg, #26372b, #192222 64%);
+}
+
+.welcome-guide header { display: grid; gap: 4px; }
+.welcome-guide h2 { font: clamp(32px, 4vw, 49px)/1 Barlow, system-ui, sans-serif; }
+.welcome-guide header p { color: var(--muted); }
+
+.welcome-guide ol {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  counter-reset: bienvenida;
+}
+
+.welcome-guide li {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #49564a;
+  border-radius: 7px;
+  background: #141d1b;
+  counter-increment: bienvenida;
+}
+
+.welcome-guide li::before {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  border-radius: 4px;
+  background: #d8f4861a;
+  color: var(--acid);
+  font: 17px Barlow, system-ui, sans-serif;
+  content: counter(bienvenida);
+}
+
+.welcome-guide h3 { font: 24px/1.05 Barlow, system-ui, sans-serif; }
+.welcome-guide li p { color: var(--muted); font-size: 13px; }
+.welcome-guide li button { justify-self: start; margin-top: 4px; }
+.welcome-guide .welcome-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.welcome-guide button:focus-visible { outline: 2px solid var(--acid); outline-offset: 3px; }
+
+@media (max-width: 800px) {
+  .welcome-guide ol { grid-template-columns: 1fr; }
+}

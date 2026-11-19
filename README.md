@@ -2,7 +2,7 @@
 
 Servidor cooperativo para **dos jugadores en GTA V Legacy** con chat, garaje, trabajos, bandas, exploración y campaña. El anfitrión ejecuta FXServer en Windows. Ambos necesitan GTA V Legacy y el cliente [FiveM](https://docs.fivem.net/docs/getting-started/installing-fivem/).
 
-**Versión candidata 0.4 · Frecuencia fantasma.** Hay 30 misiones fijas y un evento diario con nueve variantes. La validación en FiveM con los dos jugadores sigue pendiente.
+**Versión candidata 0.7 · Interfaz táctica.** Hay 39 misiones fijas y un evento diario con nueve variantes. La interfaz cuenta con pruebas offline y queda pendiente de una sesión en FiveM Legacy.
 
 ## Primera partida local
 
@@ -11,6 +11,55 @@ Servidor cooperativo para **dos jugadores en GTA V Legacy** con chat, garaje, tr
 3. Apareceréis junto a la central de Pillbox Hill. Abre el menú con **F6**. Uno inicia el contrato y el otro se une antes del primer objetivo. Cerrad el menú con **Esc**, seguid el GPS y usad **E** para confirmar cuando el juego lo indique.
 
 El archivo `servidor/resources/duo/ui/index.html` también se puede abrir en un navegador para ver el menú con datos de ejemplo.
+
+### Interfaz táctica 0.7
+
+En **Garaje**, **Hangar** y **Suministros**, pulsad **Ver ficha** para consultar o usar cada artículo. La confirmación de compra muestra el precio y el saldo previsto. Los bocadillos y las barritas se guardan en la mochila y se pueden consumir desde **F6 → Suministros → Comida** para recuperar salud.
+
+**F6** abre el resumen del cuartel. Si hay una misión activa, muestra quién está listo, el papel de cada uno, el objetivo personal y el tiempo restante. Cuando se guarda el pago, el cuartel muestra la última liquidación. Durante la partida, el HUD concentra el objetivo personal y las confirmaciones de equipo.
+
+En **Operaciones → Ver ficha** podéis consultar la zona, el vehículo, los dos papeles y el pago individual antes de preparar la salida. El garaje, el hangar y el armero tienen filtros y explican qué falta para realizar cada acción.
+
+En el navegador, los selectores de la parte inferior cambian el estado de **Doble baliza** y la perspectiva de cada jugador. Los estados sirven para revisar la invitación, la preparación, las balizas, la reconexión, el regreso y la liquidación.
+
+En esa vista previa también puedes alternar **Menú F6**, **HUD a pie**, **HUD en coche** y **HUD en avión**. En el HUD puedes escoger los extremos de la zona segura y pulsar **Esc** para volver al menú.
+
+- **Ajustes del HUD.** Desde F6 puedes elegir Completo o Compacto, escala, contraste alto y movimiento reducido. Las preferencias se guardan en el cliente.
+- **Primera salida.** La pantalla de acceso muestra el progreso de FiveM. Tras aparecer, el cuartel ofrece una guía descartable con acceso al GPS. Puedes reabrirla desde **F6 → Ayuda**.
+- **Pruebas offline.** La suite comprueba el foco, el paso de pie a coche y avión, los límites de telemetría, las confirmaciones simultáneas y el respaldo nativo. La vista previa permite revisar ambos papeles, el cronómetro y la liquidación sin conectarse.
+
+La 0.7 pasó **23 pruebas automatizadas**. La geometría del HUD se revisó en Edge a 1280×720, 1920×1080 y 2560×1080 con los dos extremos de zona segura y una referencia simulada para los subtítulos. Con dos clientes reales, repasad la primera entrada, la legibilidad con el radar y el chat activos y el rendimiento del HUD bajo carga.
+
+### Cuartel general de Pillbox Hill
+
+La ampliación de flota añade ocho coches al garaje y cinco armas al almacén. Las armas compradas se guardan en tu perfil y se entregan con munición al reaparecer.
+
+En **Mundo libre → Aviación** hay cuatro encargos con Cuban 800, Mammatus, Dodo y Maverick. Aceptad el encargo y uníos en el cuartel. El GPS os lleva a la aeronave en Sandy Shores o Grapeseed. En pareja, el piloto cruza el control y el copiloto confirma con **E** desde la aeronave. Si juegas solo, confirma desde el asiento del piloto. Para cobrar, aterrizad y detened la aeronave en el punto indicado. Las aeronaves están asignadas al encargo.
+
+El tablón también ofrece **Repuestos de Blaine** y **Enlace de Mission Row**, dos trabajos terrestres con vehículos de la flota ampliada.
+
+En el **Hangar de Sandy Shores**, marcado en el mapa, podéis comprar, pintar, guardar y recuperar estas cuatro aeronaves como vehículos personales. Usad **F6 → Hangar** o acercaos a pie y pulsad **E**. Cada jugador puede tener fuera un coche y una aeronave a la vez. La propiedad y la pintura se conservan al reiniciar.
+
+**F6** abre el cuartel con el número de jugadores conectados y las plazas de salida disponibles. Desde ahí se accede a los trabajos, las dos campañas, el garaje, los suministros y la exploración.
+
+- **Marcador azul.** El tablón abre los trabajos y permite unirse al encargo del compañero.
+- **Marcador verde lima.** La mesa de operaciones abre la preparación de las misiones exclusivas del dúo.
+- **Marcador dorado.** El garaje dispone de dos plazas de salida. Aquí se sacan, guardan, pintan y recuperan los coches de cada jugador.
+- **Marcador verde.** El almacén vende el equipo de la próxima salida.
+
+Acércate a pie y pulsa **E** para abrir la estación cuando no tengas un encargo activo. Durante un encargo, **E** confirma objetivos y **F6** sigue abriendo el menú.
+
+### Operaciones para dos
+
+Desde **F6 → Operaciones**, un jugador prepara la salida y el otro se une al contrato. Ambos pulsan **Confirmar salida** junto al tablón. En el menú podéis consultar vuestro papel y cuántas confirmaciones faltan. Volved los dos al cuartel para registrar y cobrar el encargo.
+
+| Operación | Objetivo de equipo | Pago por persona |
+| --- | --- | ---: |
+| Doble baliza | Cada jugador confirma su baliza. Hay 25 segundos entre una confirmación y la otra. Si se agotan, se pueden repetir ambas. | $1.900 |
+| Relevo nocturno | El jefe de la operación conduce el primer tramo. Cambiad de conductor para el segundo y confirmad los controles desde el asiento de copiloto. | $2.250 |
+| Salida coordinada | El copiloto elige uno de los dos accesos al puerto y el equipo escolta una furgoneta hasta recepción. | $2.600 |
+
+Si alguien se desconecta, la operación espera hasta cinco minutos a que vuelva con el mismo perfil. El registro de operaciones completadas es individual y se conserva al reiniciar.
 
 ## Partida privada desde redes distintas
 
@@ -72,7 +121,7 @@ Los comandos clásicos siguen disponibles en el chat (**T**). En F8 se escriben 
 El contrato destacado rota a medianoche UTC y añade un 25 % al pago. En Vinewood, confirma los controles con **E** desde el coche de rally. La marca personal se guarda al devolverlo. También puedes usar `/unir`, `/cancelar` y `/saldo`.
 
 - **Garaje.** Acércate al marcador dorado y abre F6. El Blista es gratuito. También hay Sultan, Dominator, Elegy RH8, Sandking XL, Comet, Kuruma y Jester. Cada coche admite los cinco colores de catálogo y la pintura de campaña al desbloquearla. Puedes marcar tu coche en el GPS desde F6 y recuperarlo en el garaje si se destruye. Para cambiar de coche, devuelve el actual y baja de él antes de guardarlo.
-- **Suministros.** El marcador verde vende chaleco, botiquín y carabina. Cada jugador empieza con $500 y una pistola. Los suministros se reinician al reaparecer.
+- **Suministros.** El marcador verde vende chaleco, botiquín y carabina. Cada jugador empieza con $500 y una pistola. La curación y el blindaje son consumibles.
 - **Exploración.** En F6, abre **Exploración** y marca la zona del alijo. Busca dentro del área y pulsa **G** al acercarte. Paga $350 por jugador y se reclama una vez al día.
 - **Evento diario.** Desde la central, usa **F6 → Exploración** para aceptar un encargo de auxilio, búsqueda o escolta. Hay tres zonas por tipo. La oferta cambia a medianoche UTC y se puede repetir mientras esté disponible. Podéis completarla en pareja o en solitario. Solo puede haber un encargo activo por equipo.
 

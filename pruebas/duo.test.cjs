@@ -5,7 +5,7 @@ const path = require('node:path')
 const test = require('node:test')
 const vm = require('node:vm')
 
-const scripts = ['contratos.js', 'expansion.js', 'campana.js', 'frecuencia.js', 'eventos.js', 'guardado.js', 'servidor.js']
+const scripts = ['contratos.js', 'expansion.js', 'flota.js', 'campana.js', 'frecuencia.js', 'operaciones.js', 'eventos.js', 'guardado.js', 'servidor.js']
 const resource = path.join(__dirname, '..', 'servidor', 'resources', 'duo')
 const licenses = { 1: 'license:aaaa', 2: 'license:bbbb' }
 const copy = value => value === undefined ? undefined : JSON.parse(JSON.stringify(value))
@@ -88,6 +88,7 @@ function createWorld(root, options = {}) {
     getPlayers: () => [...players.keys()].map(String),
     GetPlayerName: player => players.has(Number(player)) ? 'Jugador ' + player : null,
     GetPlayerEndpoint: player => options.endpoints?.[player] ?? '127.0.0.1:30120',
+    GetPlayerName: player => 'Jugador ' + player,
     GetPlayerIdentifierByType: (player, type) => {
       const license = players.get(Number(player))?.license
       return type === 'license' ? license ?? null : null
@@ -97,7 +98,7 @@ function createWorld(root, options = {}) {
     GetEntityCoords: entity => entities.get(entity)?.at || [0, 0, 0],
     GetEntityHeading: entity => entities.get(entity)?.heading || 0,
     GetEntityHealth: entity => entities.get(entity)?.health || 0,
-    GetEntitySpeed: () => 0,
+    GetEntitySpeed: entity => entities.get(entity)?.speed || 0,
     GetVehicleEngineHealth: entity => entities.get(entity)?.health || 0,
     GetEntityAttachedTo: entity => entities.get(entity)?.attachedTo || 0,
     GetVehiclePedIsIn: ped => entities.get(ped)?.vehicle || 0,
@@ -215,12 +216,35 @@ function arrive(world, at, player = 1, moveVehicle = true) {
 }
 
 function complete(world, key, partner = 2, { contract = world.data.contracts[key], routeIndex = 0 } = {}) {
+  if (contract.launch) {
+    const state = world.state(1)
+    assert.deepEqual(world.entities.get(state.vehicle).at, copy(contract.launch.slice(0, 3)))
+    arrive(world, state.stop.at)
+    world.step()
+    assert.equal(world.state(1).step, state.step, 'El control aéreo exige la aeronave asignada')
+    world.seat(world.ped(1), state.vehicle)
+    if (partner) world.seat(world.ped(partner), state.vehicle, 0)
+  }
   for (let index = world.state(1).step; index < contract.stops.length; index++) {
     const stop = contract.stops[index]
     const current = world.state(1)
     assert.equal(current.step, index, key + ' etapa ' + index)
     let confirmer = 1
     arrive(world, stop.at)
+    if (stop.briefing || stop.paired) {
+      if (stop.briefing) arrive(world, stop.at, partner, false)
+      else arrive(world, stop.paired.sites[1].at, partner, false)
+      world.step(1)
+      assert.equal(world.state(1).step, index, 'Falta confirmar el objetivo del compañero')
+      world.step(partner)
+      continue
+    }
+    if (stop.air && partner) {
+      world.step()
+      assert.equal(world.state(1).step, index, 'El piloto no confirma el control cooperativo')
+      arrive(world, stop.at, partner, false)
+      confirmer = partner
+    }
 
     if (stop.choice) {
       const driver = world.ped(1)
@@ -303,12 +327,25 @@ function complete(world, key, partner = 2, { contract = world.data.contracts[key
   }
   assert.equal(world.state(1).step, contract.stops.length, 'Vuelta al garaje del contrato ' + key)
   const finishing = world.state(1)
-  arrive(world, world.data.garage)
+  arrive(world, contract.returnAt || world.data.garage)
+  if (contract.duoOnly) {
+    world.position(world.ped(partner), contract.stops.at(-1).at)
+    world.step()
+    assert.equal(world.state(1).step, finishing.step, 'El compañero debe volver al cuartel para cobrar')
+    arrive(world, world.data.garage, partner, false)
+  }
+  if (contract.returnAt) {
+    const aircraft = world.entities.get(finishing.vehicle)
+    aircraft.speed = 12
+    world.step()
+    assert.equal(world.state(1).step, finishing.step, 'La aeronave debe detenerse para cobrar')
+    aircraft.speed = 0
+  }
   world.step()
   return finishing
 }
 
-test('Dos jugadores completan las 30 misiones y conservan el progreso previo', t => {
+test('Dos jugadores completan las 39 misiones y conservan el progreso previo', t => {
   const world = createWorld(temporaryRoot(t))
   world.seed(1, { cash: 8000, completed: 7, bestRally: 90000, cars: { blista: 'cobre', sultan: 'petroleo' } })
   world.connect(1)
@@ -316,7 +353,7 @@ test('Dos jugadores completan las 30 misiones y conservan el progreso previo', t
   assert.equal(world.panel(1).cash, 8000)
   assert.equal(world.panel(2).cars.blista, 'grafito')
   const contractIds = Object.keys(world.data.contracts)
-  assert.equal(contractIds.length, 30)
+  assert.equal(contractIds.length, 39)
   const featured = world.panel(1).featured
   let total = 0
   for (const key of contractIds) {
@@ -333,6 +370,12 @@ test('Dos jugadores completan las 30 misiones y conservan el progreso previo', t
   assert.equal(world.saved(2).cash, 500 + total)
   assert.equal(world.saved(1).completed, 7 + contractIds.length)
   assert.equal(world.saved(2).completed, contractIds.length)
+  assert.deepEqual(world.saved(1).operations, copy(world.data.operations))
+  assert.deepEqual(world.saved(2).operations, copy(world.data.operations))
+  const settlement = world.panel(2).settlement
+  const lastContract = world.data.contracts[contractIds.at(-1)]
+  assert.deepEqual(settlement, { name: lastContract.name, amount: lastContract.pay, completed: 39,
+    progress: 'Operación registrada' })
   const campaignIds = world.data.chapters.flatMap(chapter => chapter.missions)
   assert.deepEqual(world.saved(1).campaign, copy(campaignIds))
   assert.deepEqual(world.saved(2).campaign, copy(campaignIds))
@@ -608,6 +651,317 @@ test('Garaje, pintura, suministros y alijo mantienen un saldo persistente', t =>
   assert.equal(restarted.panel(1).cash, 1270 + world.data.cachePay)
   assert.equal(restarted.panel(1).cars.sultan, 'petroleo')
   assert.equal(restarted.panel(1).cache.claimed, true)
+})
+
+test('La despensa guarda la comida comprada y se puede consumir fuera del cuartel', t => {
+  const root = temporaryRoot(t)
+  const world = createWorld(root)
+  world.connect(1)
+  world.position(world.ped(1), world.data.hangar.at)
+  world.action(1, 'buy', 'bocadillo')
+  assert.deepEqual(world.panel(1).food, {})
+  world.position(world.ped(1), world.data.shop)
+  world.action(1, 'buy', 'bocadillo')
+  assert.equal(world.panel(1).cash, 445)
+  assert.equal(world.latest('duo:supply', 1), undefined)
+  const restarted = createWorld(root)
+  restarted.connect(1)
+  restarted.position(restarted.ped(1), restarted.data.hangar.at)
+  assert.equal(restarted.panel(1).food.bocadillo, 1)
+  restarted.action(1, 'eat', 'bocadillo')
+  assert.equal(restarted.latest('duo:supply', 1), 'bocadillo')
+  assert.equal(restarted.panel(1).food.bocadillo, 0)
+})
+
+test('El armero cobra una sola vez y devuelve el equipo al reaparecer y reiniciar', t => {
+  const root = temporaryRoot(t)
+  const world = createWorld(root)
+  world.connect(1)
+  assert.deepEqual(world.panel(1).weapons, [])
+  world.position(world.ped(1), world.data.shop)
+  world.action(1, 'buy', 'pistolacombate')
+  assert.equal(world.latest('duo:supply', 1), 'pistolacombate')
+  world.action(1, 'buy', 'pistolacombate')
+  assert.equal(world.saved(1).cash, 180)
+  world.fire(1, 'duo:ready')
+  assert.deepEqual(world.latest('duo:loadout', 1), ['pistolacombate'])
+  const restarted = createWorld(root)
+  restarted.connect(1)
+  restarted.fire(1, 'duo:ready')
+  assert.deepEqual(restarted.latest('duo:loadout', 1), ['pistolacombate'])
+})
+
+test('Doble baliza exige dos confirmaciones nuevas después de agotar el plazo o reconectar', t => {
+  const world = createWorld(temporaryRoot(t))
+  world.connect(1)
+  world.action(1, 'start', 'doble_baliza')
+  assert.equal(world.state(1), null)
+  world.connect(2)
+  start(world, 'doble_baliza', null)
+  const invitation = world.latest('duo:notice', 2)
+  assert.ok(invitation.includes('Invitación') && invitation.includes('Doble baliza'))
+  world.action(2, 'join')
+  assert.equal(world.latest('duo:crew'), 2)
+  assert.equal(world.panel(1).mission.stage, 'briefing')
+  assert.deepEqual(world.panel(1).mission.crew.map(member => member.self), [true, false])
+  assert.deepEqual(world.panel(2).mission.crew.map(member => member.self), [false, true])
+  const briefing = world.state(1)
+  world.action(1, 'confirmBriefing', { id: briefing.id, step: briefing.step })
+  assert.equal(world.panel(1).operation.confirmed, 1)
+  assert.deepEqual(world.panel(2).mission.crew.map(member => member.status), ['ready', 'pending'])
+  world.action(2, 'confirmBriefing', { id: briefing.id, step: briefing.step })
+  const contract = world.data.contracts.doble_baliza
+  arrive(world, contract.stops[1].at)
+  world.step()
+  const [first, second] = contract.stops[2].paired.sites
+  arrive(world, first.at)
+  world.step()
+  assert.ok(world.state(1).remaining > 0)
+  assert.equal(world.state(1).teamwork.confirmed, true)
+  assert.equal(world.state(2).teamwork.teammateConfirmed, true)
+  assert.ok(world.panel(2).mission.remaining > 0)
+  world.elapse(26000)
+  assert.equal(world.panel(1).operation.confirmed, 0)
+  arrive(world, second.at, 1, false)
+  world.step()
+  assert.equal(world.panel(1).operation.confirmed, 0, 'El compañero tiene asignada la segunda baliza')
+  arrive(world, first.at)
+  world.step()
+  world.drop(1)
+  assert.equal(world.latest('duo:crew'), 1)
+  assert.equal(world.panel(2).mission.stage, 'reconnect')
+  assert.equal(world.panel(2).mission.crew[0].status, 'away')
+  assert.equal(world.state(2).targets.length, 0)
+  world.connect(3, licenses[1])
+  assert.equal(world.panel(3).operation.role, contract.roles[0])
+  assert.equal(world.panel(3).operation.confirmed, 0)
+  assert.deepEqual(world.state(3).targets[0].at, copy(first.at))
+  assert.equal(world.latest('duo:crew', 3), 2)
+})
+
+test('Dos confirmaciones simultáneas avanzan Doble baliza una sola fase', t => {
+  const world = createWorld(temporaryRoot(t))
+  world.connect(1)
+  world.connect(2)
+  start(world, 'doble_baliza')
+  world.step(1)
+  world.step(2)
+  const contract = world.data.contracts.doble_baliza
+  arrive(world, contract.stops[1].at)
+  world.step()
+  const [first, second] = contract.stops[2].paired.sites
+  arrive(world, first.at)
+  arrive(world, second.at, 2, false)
+  const before = world.state(1)
+  const confirmation = { id: before.id, step: before.step }
+  world.elapse(650)
+  world.action(1, 'step', confirmation, false)
+  world.action(2, 'step', confirmation, false)
+  assert.equal(world.state(1).step, before.step + 1)
+  assert.equal(world.state(2).remaining, 0)
+  world.elapse(650)
+  world.action(1, 'step', confirmation, false)
+  world.action(2, 'step', confirmation, false)
+  assert.equal(world.state(1).step, before.step + 1)
+})
+
+test('El HUD separa el objetivo del jugador, la confirmación del equipo y el cronómetro', () => {
+  let tick
+  let now = 1000
+  let player = 1
+  const lines = []
+  const listeners = new Map()
+  const native = () => {}
+  const context = vm.createContext({
+    Duo: { base: [0, 0, 0], hangar: { at: [0, 0, 0] }, hq: [], contracts: {} },
+    onNet: (event, handler) => listeners.set(event, handler), on: native,
+    RegisterCommand: native, RegisterKeyMapping: native, RegisterNuiCallbackType: native,
+    setInterval: native, setTick: handler => { tick = handler },
+    GetGameTimer: () => now, PlayerId: () => 0, GetPlayerServerId: () => player,
+    IsPauseMenuActive: () => false, IsEntityDead: () => false,
+    PlayerPedId: () => 10, GetEntityCoords: () => [400, 400, 400], GetVehiclePedIsIn: () => 0,
+    SetTextFont: native, SetTextScale: native, SetTextColour: native, SetTextOutline: native,
+    BeginTextCommandDisplayText: native, EndTextCommandDisplayText: native, DrawRect: native,
+    AddTextComponentSubstringPlayerName: text => lines.push(text)
+  })
+  vm.runInContext(fs.readFileSync(path.join(resource, 'cliente.js'), 'utf8'), context)
+  vm.runInContext('initialized = true', context)
+  const update = listeners.get('duo:state')
+  const base = { id: 'dúo', step: 2, name: 'Doble baliza', stop: { text: 'Sincronizad las balizas' },
+    targets: [], members: [1, 2], remaining: 18 }
+  update({ ...base, objectives: ['Espera al compañero'],
+    teamwork: { stage: 'paired', confirmed: true, teammateConfirmed: false } })
+  tick()
+  assert.ok(lines.some(line => line.includes('0:18')))
+  assert.ok(lines.includes('Espera al compañero'))
+  assert.ok(lines.some(line => line.includes('Compañero: pendiente')))
+  lines.length = 0
+  now += 2000
+  player = 2
+  update({ ...base, remaining: 16, objectives: ['Confirma la baliza del almacén'],
+    teamwork: { stage: 'paired', confirmed: false, teammateConfirmed: true } })
+  tick()
+  assert.ok(lines.some(line => line.includes('0:16')))
+  assert.ok(lines.includes('Confirma la baliza del almacén'))
+  assert.ok(lines.some(line => line.includes('Compañero: confirmado')))
+  lines.length = 0
+  update({ ...base, step: 3, name: 'Relevo nocturno', remaining: 0, objectives: ['Conduce el segundo tramo'],
+    teamwork: { stage: 'field', switching: true } })
+  tick()
+  assert.ok(lines.includes('Relevo: intercambiad los asientos'))
+})
+
+test('El HUD NUI limita la telemetría y libera el foco al pausar, morir y detener el recurso', () => {
+  let tick
+  let now = 1000
+  let vehicle = 0
+  let classId = 0
+  let health = 180
+  let paused = false
+  let dead = false
+  let binding = 't_J'
+  const messages = []
+  const focus = []
+  const events = new Map()
+  const commands = new Map()
+  const native = () => {}
+  const context = vm.createContext({
+    Duo: { base: [0, 0, 0], hangar: { at: [0, 0, 0] }, hq: [],
+      contracts: {}, supplies: {} },
+    onNet: (event, handler) => events.set(event, [handler]),
+    on(event, handler) { events.set(event, [...(events.get(event) || []), handler]) },
+    RegisterCommand: (name, handler) => commands.set(name, handler),
+    RegisterKeyMapping: native, RegisterNuiCallbackType: native,
+    setInterval: native, setTick: handler => { tick = handler },
+    GetGameTimer: () => now, PlayerId: () => 0, GetPlayerServerId: () => 1,
+    GetCurrentResourceName: () => 'duo', IsPauseMenuActive: () => paused, IsEntityDead: () => dead,
+    PlayerPedId: () => 10, GetEntityCoords: () => [0, 0, vehicle ? 221 : 1],
+    GetVehiclePedIsIn: () => vehicle, GetEntityHealth: () => health, GetEntityMaxHealth: () => 200,
+    GetVehicleClass: () => classId, GetPedArmour: () => 63, GetVehicleEngineHealth: () => 540,
+    GetSelectedPedWeapon: () => 1, IsPedArmed: () => true, GetAmmoInClip: () => [true, 12],
+    GetAmmoInPedWeapon: () => 48, GetVehicleCurrentGear: () => 3, GetEntitySpeed: () => 25,
+    GetSafeZoneSize: () => .94, GetControlInstructionalButton: () => binding, IsControlJustReleased: () => false,
+    DrawMarker: native, SetTextFont: native, SetTextScale: native, SetTextColour: native, SetTextOutline: native,
+    BeginTextCommandDisplayText: native, EndTextCommandDisplayText: native, DrawRect: native,
+    AddTextComponentSubstringPlayerName: native, GetPedInVehicleSeat: () => 0, emitNet: native,
+    SetNuiFocus: (keyboard, cursor) => focus.push([keyboard, cursor]),
+    SendNuiMessage: payload => messages.push(JSON.parse(payload))
+  })
+  vm.runInContext(fs.readFileSync(path.join(resource, 'cliente.js'), 'utf8'), context)
+  vm.runInContext('initialized = true', context)
+  const latest = type => messages.findLast(message => message.type === type)
+  const telemetry = () => messages.filter(message => message.type === 'hud:telemetry')
+  const call = name => events.get('__cfx_nui:' + name)[0]({}, result => assert.equal(result.ok, true))
+  tick()
+  assert.equal(telemetry().length, 0)
+  call('hudReady')
+  tick()
+  assert.equal(latest('hud:visibility').visible, true)
+  assert.deepEqual(telemetry()[0].data, { mode: 'foot', health: 80, armor: 63, clip: 12,
+    ammo: 36, speed: null, gear: null, damaged: false, altitude: null, safeZone: .94 })
+  assert.equal(latest('hud:prompt').key, 'J')
+  binding = 'b_32'
+  health = 150
+  now += 249
+  tick()
+  assert.equal(telemetry().length, 1)
+  now++
+  tick()
+  assert.equal(telemetry()[1].data.health, 50)
+  assert.equal(latest('hud:prompt').key, 'X')
+  now += 250
+  tick()
+  assert.equal(telemetry().length, 2, 'Sin cambios no se vuelve a enviar')
+  vehicle = 20
+  now += 99
+  tick()
+  assert.equal(telemetry().length, 2)
+  now++
+  tick()
+  assert.deepEqual(telemetry()[2].data, { mode: 'road', health: 50, armor: 63, clip: 12,
+    ammo: 36, speed: 90, gear: 3, damaged: true, altitude: null, safeZone: .94 })
+  classId = 16
+  now += 100
+  tick()
+  assert.equal(telemetry()[3].data.mode, 'air')
+  assert.equal(telemetry()[3].data.altitude, 221)
+  assert.equal(telemetry()[3].data.gear, null)
+  const relay = { id: 'relevo', step: 3, members: [1, 2], name: 'Relevo nocturno',
+    stop: { text: 'Cambia el conductor' }, objectives: [], targets: [],
+    teamwork: { stage: 'field', switching: true } }
+  const update = events.get('duo:state')[0]
+  update(relay)
+  update(relay)
+  assert.equal(messages.filter(message => message.type === 'hud:toast').length, 1)
+  assert.equal(latest('hud:mission').data.detail, 'Relevo: intercambiad los asientos')
+
+  commands.get('central')()
+  assert.deepEqual(focus.at(-1), [true, true])
+  assert.equal(latest('hud:visibility').visible, false)
+  call('cierra')
+  assert.deepEqual(focus.at(-1), [false, false])
+  commands.get('central')()
+  paused = true
+  tick()
+  assert.deepEqual(focus.at(-1), [false, false])
+  paused = false
+  commands.get('central')()
+  dead = true
+  tick()
+  assert.deepEqual(focus.at(-1), [false, false])
+  dead = false
+  commands.get('central')()
+  for (const stop of events.get('onClientResourceStop')) stop('duo')
+  assert.deepEqual(focus.at(-1), [false, false])
+  tick()
+  now += 10000
+  tick()
+  assert.equal(latest('hud:visibility').visible, false)
+  call('hudHeartbeat')
+  tick()
+  assert.equal(latest('hud:visibility').visible, true)
+})
+
+test('El piloto puede completar los cuatro encargos aéreos en solitario', t => {
+  const world = createWorld(temporaryRoot(t))
+  world.connect(1)
+  const flights = Object.entries(world.data.contracts).filter(([, contract]) => contract.launch)
+  assert.equal(flights.length, 4)
+  for (const [key] of flights) {
+    start(world, key, null)
+    complete(world, key, null)
+    assert.equal(world.state(1), null)
+  }
+  assert.equal(world.saved(1).completed, 4)
+})
+
+test('El hangar conserva la aeronave comprada y mantiene una plaza independiente del coche', t => {
+  const root = temporaryRoot(t)
+  const world = createWorld(root)
+  world.seed(1, { cash: 12000, completed: 0 })
+  world.connect(1)
+  world.position(world.ped(1), world.data.motorPool)
+  world.action(1, 'pull', 'blista')
+  world.action(1, 'locateHangar')
+  assert.deepEqual(world.latest('duo:locateCar', 1), copy(world.data.hangar.at))
+  world.action(1, 'locateHQ')
+  assert.deepEqual(world.latest('duo:locateCar', 1), copy(world.data.base))
+  world.action(1, 'buyCar', 'mammatus')
+  assert.equal(world.panel(1).cash, 12000, 'La compra exige estar en el hangar')
+  world.position(world.ped(1), world.data.hangar.at)
+  world.action(1, 'buyCar', 'mammatus')
+  world.action(1, 'pull', 'mammatus')
+  const aircraft = world.find('mammatus', 'vehicle')
+  assert.ok(aircraft)
+  assert.equal(world.panel(1).activeAircraft, 'mammatus')
+  assert.equal(world.panel(1).activeCar, 'blista')
+  world.action(1, 'paint', { model: 'mammatus', paint: 'cobre' })
+  world.action(1, 'park', 'mammatus')
+  assert.equal(world.find('mammatus', 'vehicle'), undefined)
+  assert.equal(world.panel(1).activeCar, 'blista')
+  const restarted = createWorld(root)
+  restarted.connect(1)
+  assert.equal(restarted.panel(1).cars.mammatus, 'cobre')
 })
 
 test('Un compañero se reincorpora con la misma licencia y al salir ambos se limpia el contrato', t => {

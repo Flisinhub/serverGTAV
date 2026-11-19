@@ -50,6 +50,9 @@ globalThis.DuoStore = (() => {
         ? data.cars : { blista: 'grafito' },
       bestRally: data.bestRally || 0,
       campaign: Array.isArray(data.campaign) ? data.campaign : [],
+      weapons: Array.isArray(data.weapons) ? data.weapons : [],
+      food: data.food && typeof data.food === 'object' && !Array.isArray(data.food) ? data.food : {},
+      operations: Array.isArray(data.operations) ? data.operations : [],
       receipts: Array.isArray(data.receipts) ? data.receipts : []
     }
   }
@@ -83,6 +86,9 @@ globalThis.DuoStore = (() => {
       data.completed++
       data.receipts.push(receipt)
       if (entry.campaign && !data.campaign.includes(entry.campaign)) data.campaign.push(entry.campaign)
+      if (entry.operation && !data.operations.includes(entry.operation)) data.operations.push(entry.operation)
+      data.lastSettlement = { name: payout.name, amount: payout.pay, completed: data.completed,
+        progress: entry.operation ? 'Operación registrada' : entry.campaign ? 'Misión de campaña registrada' : 'Contrato registrado' }
       const record = payout.rallyTime && (!data.bestRally || payout.rallyTime < data.bestRally)
       if (record) data.bestRally = payout.rallyTime
       if (save(entry.key, data)) settled.push({ key: entry.key, cash: data.cash, record, pay: payout.pay, name: payout.name })
