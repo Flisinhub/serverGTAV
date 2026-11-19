@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Los Santos a Dos</title>
+  <link rel="stylesheet" href="estilo.css">
+  <script defer src="../contratos.js"></script>
+  <script defer src="../expansion.js"></script>
+  <script defer src="../campana.js"></script>
+  <script defer src="../frecuencia.js"></script>
+  <script defer src="panel.js"></script>
+</head>
+<body>
+  <main id="app" hidden aria-label="Central de Los Santos a Dos">
+    <header class="top">
+      <div class="brand"><span aria-hidden="true"></span> CENTRAL LS</div>
+      <div class="account"><span id="completed"></span><strong id="cash"></strong><button id="close" aria-label="Cerrar panel">Esc <b aria-hidden="true">×</b></button></div>
+    </header>
+    <section class="hero">
+      <div><p class="eyebrow">CENTRAL DE OPERACIONES</p><h1>Los Santos a Dos</h1><p id="headline">Contratos cooperativos y garaje personal</p></div>
+    </section>
+    <nav id="tabs" aria-label="Secciones">
+      <button data-tab="campaign" aria-pressed="true">Campañas</button>
+      <button data-tab="contracts" aria-pressed="false">Mundo libre</button>
+      <button data-tab="garage" aria-pressed="false">Garaje</button>
+      <button data-tab="shop" aria-pressed="false">Suministros</button>
+      <button data-tab="world" aria-pressed="false">Exploración</button>
+    </nav>
+    <div id="viewport">
+      <div id="bar"></div>
+      <div id="objectives" hidden></div>
+      <div id="stories" role="group" aria-label="Campañas disponibles" hidden></div>
+      <div id="chapters" hidden></div>
+      <div id="content"></div>
+    </div>
+    <footer><span id="status" role="status">Consultando la central…</span><span class="record" id="best"></span></footer>
+  </main>
+</body>
+</html>
+

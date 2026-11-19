@@ -1,0 +1,111 @@
+# Los Santos a Dos
+
+Servidor cooperativo para **dos jugadores en GTA V Legacy** con chat, garaje, trabajos, bandas, exploración y campaña. El anfitrión ejecuta FXServer en Windows. Ambos necesitan GTA V Legacy y el cliente [FiveM](https://docs.fivem.net/docs/getting-started/installing-fivem/).
+
+**Versión candidata 0.4 · Frecuencia fantasma.** Hay 30 misiones fijas y un evento diario con nueve variantes. La validación en FiveM con los dos jugadores sigue pendiente.
+
+## Primera partida local
+
+1. Genera una clave gratuita de servidor en el [portal de Cfx.re](https://portal.cfx.re/servers/registration-keys). Abre **Iniciar servidor.cmd** e introdúcela en el anfitrión cuando se solicite. El lanzador la guarda en `servidor/licencia.cfg`.
+2. En el anfitrión, abre FiveM y ejecuta `connect 127.0.0.1:30120` en **F8**. Para una prueba en la misma LAN, el otro jugador usa `connect IP-LOCAL-DEL-ANFITRION:30120`. Windows muestra la IPv4 local con `ipconfig`.
+3. Apareceréis junto a la central de Pillbox Hill. Abre el menú con **F6**. Uno inicia el contrato y el otro se une antes del primer objetivo. Cerrad el menú con **Esc**, seguid el GPS y usad **E** para confirmar cuando el juego lo indique.
+
+El archivo `servidor/resources/duo/ui/index.html` también se puede abrir en un navegador para ver el menú con datos de ejemplo.
+
+## Partida privada desde redes distintas
+
+1. Instalad [Tailscale](https://tailscale.com/download/windows) e iniciad sesión en ambos equipos. Desde la página de máquinas de Tailscale, el anfitrión comparte únicamente su PC con la cuenta del segundo jugador. El segundo acepta la invitación. [Cómo compartir un equipo](https://tailscale.com/docs/features/sharing)
+2. En el control de acceso de Tailscale, concede a esa cuenta únicamente `tcp:30120` y `udp:30120` hacia la IPv4 Tailscale del anfitrión. Revisa las reglas más amplias que coincidan con el invitado y ese equipo porque los permisos se suman. Si Windows requiere una autorización entrante, crea dos reglas para `runtime\FXServer.exe`, una por protocolo, restringidas al puerto 30120, a la IPv4 Tailscale local y a la IPv4 Tailscale del invitado. El router puede conservar su configuración. [Sintaxis de permisos de Tailscale](https://tailscale.com/docs/reference/syntax/grants)
+3. Si aún no tenéis los dos identificadores `license:`, cierra cualquier FXServer abierto y ejecuta en PowerShell `& '.\Iniciar remoto.cmd' -Registrar`. Introduce la IPv4 del invitado tal como aparece desde Tailscale en el **anfitrión**. El perfil de registro admite el anfitrión por loopback y el invitado por esa IP de la VPN. Conectaos usando las direcciones del paso siguiente, ejecuta `duo_identificadores` en la consola de FXServer y apunta los dos identificadores en el anfitrión. Cierra ese servidor al terminar.
+4. Abre **Iniciar remoto.cmd** normalmente. La primera vez pide los dos identificadores. Se guardan en `servidor/jugadores.cfg`. El anfitrión usa `connect 127.0.0.1:30120` en F8. El invitado usa `connect IP-TAILSCALE-DEL-ANFITRION:30120` con la dirección que muestra **su** Tailscale para el equipo compartido.
+5. Para diagnosticar la conexión, confirma primero que FXServer acepta al anfitrión. Desde el invitado, comprueba el acceso TCP con `Test-NetConnection IP-TAILSCALE-DEL-ANFITRION -Port 30120` y después entra con FiveM para comprobar la conexión de juego. Si el juego llega al servidor y rechaza la cuenta, revisa los dos identificadores en `servidor/jugadores.cfg` y reinicia.
+
+El lanzador remoto comprueba la IPv4 local de Tailscale y liga FXServer a esa IP y a loopback. El acceso habitual queda limitado a las dos licencias autorizadas. La clave y los identificadores son locales al anfitrión.
+
+## Campaña y mundo libre
+
+Abre **F6 → Campaña** para elegir la historia y ver sus capítulos. El anfitrión de cada misión necesita tener su capítulo desbloqueado. Su compañero puede ayudar y cobrar. Para que la misión cuente en el progreso de ambos, cada uno debe tener disponible ese capítulo.
+
+### Primera campaña
+
+| Capítulo | Misiones |
+| --- | --- |
+| La central | Carga urgente y Avería nocturna |
+| El puerto | Contenedor 17 y Salida de la terminal |
+| La ruta del desierto | Puesto perdido y Relevo en Sandy Shores |
+| El último encargo | Cruce de Davis y Último turno |
+
+En los puntos de búsqueda, el mapa muestra todas las ubicaciones aún por inspeccionar. En el relevo, el copiloto confirma desde el coche y ambos intercambian asiento antes del siguiente control. Si uno se desconecta en mitad de una misión, puede reincorporarse con la misma cuenta durante los siguientes cinco minutos mientras el otro permanece en el contrato.
+
+### Frecuencia fantasma
+
+Esta historia se desbloquea al completar la primera campaña. Cada jugador conserva su avance. Tras completar las doce misiones, el garaje habilita la pintura **Frecuencia**.
+
+| Capítulo | Misiones |
+| --- | --- |
+| La llamada | Turno interrumpido, Ecos de Vespucci y El pasajero de madrugada |
+| Marea baja | Dos muelles, La furgoneta gemela y Contrapeso |
+| Fuera de cobertura | Tres balizas, Camino de sal y Último relevo |
+| Volver al aire | La prueba, Dos destinos y Frecuencia fantasma |
+
+Las introducciones y los subtítulos dan el contexto de cada encargo. Compartid las pistas que reciba cada jugador. Los objetivos separados se pueden confirmar en paralelo en dúo o uno tras otro en solitario. En las etapas de rutas alternativas, seguid uno de los puntos marcados. Las dos rutas del final permiten cerrar la historia, y se puede repetir el encargo para probar la otra.
+
+Cuando una misión larga haya guardado un punto intermedio, consulta **F6 → Campaña** para ver si puedes reintentar desde allí. Ese punto pertenece a la partida activa. El pago y el avance permanente se guardan al cerrar el encargo.
+
+### Contratos y exploración
+
+Los comandos clásicos siguen disponibles en el chat (**T**). En F8 se escriben sin la barra inicial.
+
+| Comando | Actividad | Pago base por jugador |
+| --- | --- | ---: |
+| `/mensajeria` | Recogida y entregas urbanas | $420 |
+| `/taxi` | Traslado de un NPC. Dejad libre el asiento trasero derecho | $550 |
+| `/taller` | Herramientas y asistencia en Mirror Park | $680 |
+| `/costa` | Reparto de material de salvamento de Vespucci a Chumash | $960 |
+| `/puerto` | Recuperación de carga en territorio de Los del Puerto | $1.050 |
+| `/rural` | Suministros para Grapeseed y el aeródromo | $1.220 |
+| `/barrio` | Expedientes en zonas de Ballas y Families | $1.250 |
+| `/rally` | Vuelta a Vinewood. Cinco controles y cuatro minutos desde la salida | $1.350 |
+| `/desierto` | Envío a Sandy Shores y encuentro con Lost MC | $1.600 |
+| `/nocturno` | Repuestos robados y dos encuentros con los Vagos | $1.850 |
+
+El contrato destacado rota a medianoche UTC y añade un 25 % al pago. En Vinewood, confirma los controles con **E** desde el coche de rally. La marca personal se guarda al devolverlo. También puedes usar `/unir`, `/cancelar` y `/saldo`.
+
+- **Garaje.** Acércate al marcador dorado y abre F6. El Blista es gratuito. También hay Sultan, Dominator, Elegy RH8, Sandking XL, Comet, Kuruma y Jester. Cada coche admite los cinco colores de catálogo y la pintura de campaña al desbloquearla. Puedes marcar tu coche en el GPS desde F6 y recuperarlo en el garaje si se destruye. Para cambiar de coche, devuelve el actual y baja de él antes de guardarlo.
+- **Suministros.** El marcador verde vende chaleco, botiquín y carabina. Cada jugador empieza con $500 y una pistola. Los suministros se reinician al reaparecer.
+- **Exploración.** En F6, abre **Exploración** y marca la zona del alijo. Busca dentro del área y pulsa **G** al acercarte. Paga $350 por jugador y se reclama una vez al día.
+- **Evento diario.** Desde la central, usa **F6 → Exploración** para aceptar un encargo de auxilio, búsqueda o escolta. Hay tres zonas por tipo. La oferta cambia a medianoche UTC y se puede repetir mientras esté disponible. Podéis completarla en pareja o en solitario. Solo puede haber un encargo activo por equipo.
+
+## Copia y restauración de progreso
+
+Cierra FXServer antes de respaldar, actualizar o restaurar. Abre PowerShell en la carpeta del proyecto.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\Respaldar progreso.ps1'
+```
+
+La copia queda debajo de `respaldos` e incluye perfiles y pagos pendientes, con un manifiesto de comprobación. Conserva la carpeta completa. Para restaurar una copia, sustituye el nombre de ejemplo por el de tu carpeta:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\Respaldar progreso.ps1' -Restaurar '.\respaldos\progreso-FECHA-ID' -Confirm
+```
+
+El script valida los archivos y hace otra copia del progreso actual antes de reemplazarlo. `-WhatIf` permite previsualizar la operación. Conserva `servidor/licencia.cfg` y `servidor/jugadores.cfg` aparte en el anfitrión si necesitas reinstalar.
+
+## Comprobación con los dos clientes
+
+**Prueba local sin clave.** Abre `Probar servidor.cmd` o ejecuta `node --test pruebas/duo.test.cjs` desde el proyecto con Node.js 20 o posterior. La suite de regresión utiliza perfiles temporales. Para revisar la interfaz en el navegador, abre `servidor/resources/duo/ui/index.html`.
+
+1. Verifica el arranque local y después la conexión desde otra red con el perfil remoto.
+2. Completad la primera campaña y abrid Frecuencia fantasma. En La llamada, comprobad los subtítulos, la recogida del pasajero y las pistas por jugador. Confirmad que el solitario también permite resolver las pistas.
+3. Probad un reintento desde un punto intermedio, las dos rutas del final y un evento de cada tipo. Comprobad GPS, NPC, reparto de tareas, pagos y reincorporación tras una desconexión.
+4. Probad mensajería, taxi, rally y un contrato de bandas. Comprad y pintad un coche y comprobad su recuperación.
+5. Reinicia FXServer, volved a entrar y verificad ambas campañas, el saldo, el garaje, la pintura Frecuencia y el récord de rally.
+
+Hasta que se prueben estos pasos con la clave y los dos clientes, la conexión remota y el comportamiento dentro de GTA quedan pendientes de validación.
+
+## Recursos
+
+- Vehículos del [catálogo nativo de GTA V en FiveM](https://docs.fivem.net/docs/game-references/vehicle-references/vehicle-models/).
+- Barlow Condensed de [The Barlow Project Authors](https://github.com/google/fonts/tree/main/ofl/barlowcondensed), con su licencia en `servidor/resources/duo/ui/OFL.txt`.
+- Portada original de la central e ilustraciones originales de capítulo. Chat y gestor de aparición de Cfx.re.

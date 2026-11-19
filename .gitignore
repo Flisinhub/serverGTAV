@@ -1,0 +1,9 @@
+runtime/
+servidor/cache/
+servidor/licencia.cfg
+servidor/jugadores.cfg
+servidor/resources/duo/perfil-*.json
+servidor/resources/duo/pago-*.json
+respaldos/
+*.log
+dependencias/
