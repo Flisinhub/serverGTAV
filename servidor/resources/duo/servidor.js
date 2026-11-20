@@ -45,8 +45,98 @@ function story2Complete(data) {
 }
 
 function canJoin(player) {
-  return !!run && !run.started && !run.engaged && !run.disconnected.size &&
-    !run.members.has(player) && run.members.size < 2 && near(GetPlayerPed(player), base, 13)
+  if (!run || run.started || run.engaged || run.disconnected.size || run.members.has(player) || run.members.size >= 2) return false
+  const ped = GetPlayerPed(player)
+  return run.incident
+    ? near(ped, run.incident.at, 35) && !profile(player)?.incidents.includes(run.incident.id)
+    : near(ped, base, 13)
+}
+
+function rescueTargets(player) {
+  const pilot = run.members.get(player) === (run.rescueDriver || run.leadKey)
+  const targets = []
+  if (run.people.some(p => p.boarded)) targets.push({at:Duo.rescue.hospital,text:'Entregad juntos los supervivientes en Pillbox'})
+  const index = run.people.findIndex(p => !p.lost && !p.boarded)
+  if (index >= 0 && !pilot) targets.unshift({at:Duo.rescue.people[index],text:'Localiza al civil y confirma junto a él'})
+  if (pilot && !targets.length) targets.push({at:Duo.rescue.meeting,text:'Conduce a Davis y sigue las indicaciones del rescatista'})
+  return targets
+}
+
+function rescueTick() {
+  let changed = false
+  for (const [i,person] of run.people.entries()) {
+    if (person.lost) continue
+    const at = Duo.rescue.people[i]
+    if (!person.entity) {
+      if (!Array.from(run.members.keys()).some(id => near(GetPlayerPed(id),at,100))) continue
+      person.entity = createPed('a_m_m_business_01',at)
+      if (!person.entity) return failure('No se pudo crear el encuentro.')
+      FreezeEntityPosition(person.entity,true)
+      for (const [dx,dy] of [[24,9],[-22,13],[15,-24]]) {
+        const enemy = createPed('u_m_y_zombie_01',[at[0]+dx,at[1]+dy,at[2]])
+        if (!enemy) return failure('No se pudo crear el encuentro.')
+        run.enemies.push(enemy)
+      }
+      changed = true
+    }
+    if (!alive(person.entity)) {
+      person.lost = true
+      person.boarded = false
+      if (run.enemies.length < 8 && near(person.entity,at,40)) {
+        const infected = createPed('u_m_y_zombie_01',GetEntityCoords(person.entity))
+        if (infected) run.enemies.push(infected)
+      }
+      changed = true
+    } else {
+      const aboard = GetVehiclePedIsIn(person.entity,false) === run.vehicle
+      if (aboard !== person.boarded) { person.boarded = aboard; changed = true }
+    }
+  }
+  if (run.people.every(p => p.lost)) return failure('Se perdió el último superviviente.')
+  if (changed) sync()
+}
+
+function rescueStep(player) {
+  const ped = GetPlayerPed(player)
+  if (!alive(ped)) return
+  const hospital = Duo.rescue.hospital
+  if (near(ped,hospital,10)) {
+    const rescued = run.people.filter(p => alive(p.entity) && GetVehiclePedIsIn(p.entity,false) === run.vehicle).length
+    if (!rescued || !near(run.vehicle,hospital,15) || GetEntitySpeed(run.vehicle)>1 ||
+        !Array.from(run.members.keys()).every(id => alive(GetPlayerPed(id)) && near(GetPlayerPed(id),hospital,14)))
+      return send(player,'Reuníos con la ambulancia parada y un superviviente a bordo.')
+    run.bonus = rescued === 2 ? 800 : 0
+    return completeContract(player)
+  }
+  if (run.members.get(player) === (run.rescueDriver || run.leadKey)) return send(player,'El rescatista confirma la recogida.')
+  const i = run.people.findIndex(p => !p.boarded && !p.lost)
+  if (i < 0) return
+  const person = run.people[i]
+  const at = Duo.rescue.people[i]
+  const driver = [...run.members].find(([,key]) => key === (run.rescueDriver || run.leadKey))[0]
+  if (!alive(person.entity) || !near(ped,at,7) || GetVehiclePedIsIn(ped,false) ||
+      !near(run.vehicle,at,15) || GetEntitySpeed(run.vehicle)>1 || GetPedInVehicleSeat(run.vehicle,-1)!==GetPlayerPed(driver))
+    return send(player,'El conductor debe parar cerca del civil y el rescatista bajar a recogerlo.')
+  if (GetPedInVehicleSeat(run.vehicle,i+1)) return send(player,'Liberad el asiento trasero del superviviente.')
+  FreezeEntityPosition(person.entity,false)
+  SetPedIntoVehicle(person.entity,run.vehicle,i+1)
+  rescueTick()
+}
+
+function playerTargets(stop, player) {
+  if (run.people && run.step) return rescueTargets(player)
+  if (run.people && run.step) return [rescueTargets(player)[0]?.text || 'Espera al equipo', 'A bordo · '+run.people.filter(p=>p.boarded).length+'/2']
+  if (run.heist && run.step) return [DuoHeist.target(run,player)]
+  if (run.key === 'guardacostas' && run.step > 0) {
+    const pilot = run.members.get(player) === run.leadKey
+    if (run.step === 1 && pilot && !run.pilotReady)
+      return [{ at: Duo.sea.helipad, text:'Recoge el Maverick en Sandy Shores' }]
+    if (run.step === 1 && pilot) return [{ at: run.wreckAt, text: 'Localiza el barco desde el Maverick', air: true }]
+    if (run.step === 1) return [{ at: Duo.sea.dock, text: 'Toma el mando de la lancha y espera indicaciones' }]
+    if (pilot) return run.step === 2 ? [{ at: run.wreckAt, text: 'Guía a la lancha por Teams', air: true }] : []
+    return [{ at: run.step === 2 ? run.wreckAt : Duo.sea.dock, text: currentStop().text, localOnly: run.step === 2 }]
+  }
+  return stop.briefing || stop.paired ? operationTargets(stop, player) : stopTargets(stop, run.members.size)
 }
 
 function operationTargets(stop, player) {
@@ -59,6 +149,9 @@ function operationTargets(stop, player) {
 function objectives(player) {
   if (!run?.members.has(player)) return []
   const stop = currentStop()
+  if (run.heist && run.step) return [run.disconnected.size ? 'Esperando a tu compañero.' : DuoHeist.hint(run,player),
+    'Botín asegurado · $'+run.heist.secured+' por persona']
+  if (!run.failed && run.key === 'guardacostas' && run.step > 0) return [playerTargets(stop, player)[0]?.text || 'Orienta al patrón y acompaña el rescate desde el aire.']
   if (!run.failed && stop.air && run.members.size === 2) {
     const pilot = GetPedInVehicleSeat(run.vehicle, -1)
     return [GetPlayerPed(player) === pilot
@@ -66,6 +159,20 @@ function objectives(player) {
       : 'Copiloto: pulsa E dentro del control aéreo.']
   }
   if (run.failed) return [run.failed.message, 'Abre F6 para reintentar desde el último punto.']
+  if (run.incident && run.members.size === 2) {
+    if (run.contract.kind !== 'Búsqueda') {
+      const lead = run.members.get(player) === run.leadKey
+      return [stop.text, lead ? 'Piloto: mantén el vehículo en posición.' : 'Copiloto: confirma el objetivo.']
+    }
+    if (stop.search) {
+      const axis = Number(run.members.get(player) !== run.leadKey)
+      const sorted = [...stop.search, stop.at].sort((a, b) => a[axis] - b[axis])
+      const direction = axis ? 'sur a norte' : 'oeste a este'
+      return [stop.text, 'Pista: punto ' + (sorted.indexOf(stop.at) + 1) + '/' + sorted.length + ' de ' + direction + '.']
+    }
+  }
+  if (run.key === 'ultima_recogida' && run.step === 1 && run.pick !== undefined)
+    return [run.members.get(player) === run.leadKey ? 'Detén la furgoneta en '+stop.text : 'Baja y recoge '+stop.boxes+' bultos en '+stop.text]
   if (run.contract.duoOnly) {
     if (run.members.size < 2) return ['Esperando a tu compañero.']
     if (stop.briefing || stop.paired) {
@@ -77,6 +184,7 @@ function objectives(player) {
     const role = Array.from(run.members.keys()).indexOf(player)
     return run.members.size === 1 ? stop.clues : [stop.clues[role], 'Comparte tu pista con tu compañero.']
   }
+  if (stop.dispatch) return [run.members.get(player) === run.leadKey ? 'Espera a que tu copiloto marque el comercio.' : stop.text]
   if (stop.choice) {
     if (run.choice !== undefined) return [stop.choice[run.choice].text]
     return [canChooseRoute(player) ? 'Abre F6 y elige una ruta.' : 'El copiloto elige la ruta desde F6.']
@@ -117,6 +225,36 @@ function dailyWorld() {
   return Duo.worldEvents[day() % Duo.worldEvents.length]
 }
 
+const incidentPeriod = 20 * 60 * 1000
+function incidentWindow() {
+  return Math.floor(Date.now() / incidentPeriod)
+}
+
+function incidentOffers() {
+  const window = incidentWindow()
+  return Duo.incidentDistricts.map((district, index) => {
+    const [route, at] = district.sites[(window + index) % district.sites.length]
+    const contract = Duo.worldEvents[route]
+    return { id: window + ':' + contract.key, district: district.name, contract, at, expires: (window + 1) * incidentPeriod }
+  })
+}
+
+function incidentBoard(player, data = profile(player)) {
+  const ped = GetPlayerPed(player)
+  const [x, y, z] = ped && DoesEntityExist(ped) ? GetEntityCoords(ped) : [0, 0, 0]
+  return incidentOffers().map(({ id, district, contract, at, expires }) => {
+    const { name, kind, zone, brief, pay } = contract
+    const distance = Math.round(Math.hypot(x - at[0], y - at[1], z - at[2]))
+    const completed = !!data?.incidents.includes(id)
+    return { id, district, name, kind, zone, brief, pay, at, expires, distance, completed,
+      canStart: !!data && !run && !completed && near(ped, at, 35) }
+  }).sort((a, b) => a.distance - b.distance)
+}
+
+function pushIncidents(player) {
+  emitNet('duo:incidents', player, incidentBoard(player))
+}
+
 function canChooseRoute(player) {
   if (!run?.members.has(player) || run.failed || !currentStop().choice || run.choice !== undefined) return false
   if (run.contract.duoOnly && run.members.size < 2) return false
@@ -150,7 +288,7 @@ function fleetView(active, air, vehicles) {
 }
 
 function remainingTime() {
-  const due = run.pairUntil || run.deadline
+  const due = run.heist?.expires || run.pairUntil || run.deadline
   return due ? Math.max(0, Math.ceil((due - Date.now()) / 1000)) : 0
 }
 
@@ -166,7 +304,8 @@ function missionView(player) {
     const key = members[index]
     return {
       name: run.names.get(key) || 'Plaza libre',
-      role: run.contract.roles?.[index] || 'Integrante del equipo',
+      role: run.people && key ? run.contract.roles[Number(key !== (run.rescueDriver || run.leadKey))] : run.contract.roles?.[index] || (run.incident && run.contract.kind !== 'Búsqueda'
+        ? (index ? 'Copiloto y confirmación' : 'Conducción') : 'Integrante del equipo'),
       self: !!key && run.members.get(player) === key,
       status: !key ? 'vacant' : !connections.has(key) ? 'away' :
         confirmed.has(key) ? (stop.briefing ? 'ready' : 'confirmed') :
@@ -174,9 +313,10 @@ function missionView(player) {
     }
   })
   return {
-    stage, name: run.contract.name,
-    area: run.contract.area, vehicle: run.contract.vehicleName || cars[run.contract.vehicle]?.name || run.contract.vehicle,
-    pay: run.contract.pay + run.bonus, step: run.step + 1, total: run.contract.stops.length + 1,
+    stage, deliveryLabel: run.handler && stage === 'return' ? 'Entrega en LSIA' : null, name: run.contract.name,
+    area: run.incident?.contract.zone || run.contract.area, incident: run.incident?.id || null,
+    vehicle: run.contract.vehicleName || cars[run.contract.vehicle]?.name || run.contract.vehicle,
+    pay: run.contract.pay + run.bonus, step: run.step + 1, total: run.contract.stops.length + (run.incident || run.people || run.key === 'guardacostas' ? 0 : 1),
     remaining: remainingTime(), crew
   }
 }
@@ -192,6 +332,10 @@ function panel(player) {
   const vehicles = GetAllVehicles()
   const carBay = fleetView(vehicle, false, vehicles)
   emitNet('duo:panel', player, {
+    heist: DuoHeist.view(run,player), completedHeists: data?.heists || [],
+    dispatch: dispatchView(player), setup: shiftView(player, data),
+    resumeName: !run && data?.checkpoint && !data.receipts.includes(data.checkpoint.receipt) ? contracts[data.checkpoint.key]?.name : null,
+    startDistance: ped ? Math.round(Math.hypot(...GetEntityCoords(ped).slice(0,3).map((v,i) => v - base[i]))) : null,
     crew: getPlayers().length,
     garageBays: parking.map(slot => vehicles.some(entity => near(entity, slot, 2.7))),
     fleet: { garage: carBay, hangar: fleetView(aircraft, true, vehicles) },
@@ -201,9 +345,11 @@ function panel(player) {
     food: data?.food || {},
     operations: data?.operations || [],
     settlement: data?.lastSettlement || null,
+    incidents: incidentBoard(player, data),
     mission: missionView(player),
     operation: member && run.contract.duoOnly ? {
-      id: run.id, step: run.step, role: run.contract.roles[Number(run.members.get(player) !== run.leadKey)],
+      id: run.id, step: run.step, role: run.contract.roles[Number(run.members.get(player) !== (run.rescueDriver || run.leadKey))],
+      chooseRescueRole: !!run.people && run.step === 0 && run.members.size === 2 && !run.confirmed.size,
       count: run.members.size, briefing: !!stop.briefing, paired: !!stop.paired,
       confirmed: run.confirmed.size,
       canBrief: !run.failed && !!stop.briefing && run.members.size === 2 && near(ped, base, 7) &&
@@ -301,6 +447,14 @@ function handleGarage(player, action, value, data) {
 }
 
 function currentStop() {
+  if (run.handler && run.step === 2) return { at: Duo.eclipse.landing, text: 'Aterrizad juntos en la entrega de LSIA' }
+  if (run.key === 'ultima_recogida' && run.step === 1) return run.pick !== undefined
+    ? Duo.pickups[run.pick] : { at: Duo.garage, text: 'Copiloto: abre F6 para elegir la siguiente parada', dispatch: true }
+  if (run.key === 'noche_davis' && run.step === 1) {
+    const neighbor = Duo.davis[run.neighbor]
+    return { at: run.returnVisit ? neighbor.next : neighbor.end, text: run.returnVisit ? neighbor.follow :
+      ['Entrega el parte de avería en el taller', 'Entrega las cajas del comercio', 'Deja a Rosa en Pillbox'][run.neighbor] }
+  }
   return run.contract.stops[run.step] || (run.contract.returnAt
     ? { at: run.contract.returnAt, text: 'Aterriza y estaciona en el punto indicado' }
     : { at: garage, text: 'Devuelve el vehiculo a la base' })
@@ -311,6 +465,7 @@ function alive(entity) {
 }
 
 function stopTargets(stop, count) {
+  if (stop.dispatch) return []
   if (stop.choice) {
     if (run.choice === undefined) return []
     return [stop.choice[run.choice]]
@@ -337,18 +492,23 @@ function sync(player = -1) {
   for (const recipient of recipients) {
     const stop = run && currentStop()
     const participating = run?.members.has(recipient)
-    const pairStage = stop?.briefing || stop?.paired
     emitNet('duo:state', recipient, participating ? {
       id: run.id, step: run.step, name: run.contract.name,
-      stop: { at: stop.at, text: stop.choice?.[run.choice]?.text || stop.text, gang: stop.gang || null },
+      terminal: !!run.heist && run.step === 1, cockpit: run.heist ? DuoHeist.cockpit(run,recipient) : null, crane: net(run.handler), cargo: DuoHeist.cargo(run,recipient),
+      airReturn: !!run.contract.returnAt && run.step === run.contract.stops.length,
+      finalDuo: !!run.contract.duoOnly && run.step === run.contract.stops.length,
+      incidentKind: run.incident?.contract.kind || (run.key === 'noche_davis' && run.choice !== undefined ?
+        ['Auxilio','Búsqueda','Vecino'][run.choice] : null),
+      sceneAt: run.incident ? stop.at : run.key === 'noche_davis' && run.choice !== undefined ? Duo.davis[run.choice].at : null, stop: { at: stop.at, text: stop.choice?.[run.choice]?.text || stop.text, gang: stop.gang || null },
       targets: run.failed || (run.contract.duoOnly && run.members.size < 2) ? [] :
-        pairStage ? operationTargets(stop, recipient) : stopTargets(stop, run.members.size),
+        playerTargets(stop, recipient),
       dialogue: run.dialogue,
       failed: !!run.failed,
       objectives: objectives(recipient),
-      vehicle: net(run.vehicle), passenger: net(run.passenger),
+      vehicle: net(run.vehicle), boat: net(run.boat), waving: run.key === 'guardacostas' && run.step === 2 ? net(run.castaway) : 0, passenger: net(run.passenger),
       tow: net(run.tow),
       escort: run.escort ? { vehicle: net(run.escort.vehicle), driver: net(run.escort.driver), at: stop.at } : null,
+      outbreak: run.people ? run.people.filter(p => !p.lost && !p.boarded).map(p=>net(p.entity)).filter(Boolean) : null,
       enemies: run.enemies.map(net).filter(Boolean), engaged: run.engaged,
       total: run.contract.stops.length,
       remaining: remainingTime(),
@@ -382,6 +542,9 @@ function clearMissionEntities() {
   clean(run.escort?.driver)
   clean(run.escort?.vehicle)
   clean(run.vehicle)
+  for (const person of run.people || []) clean(person.entity)
+  clean(run.handler)
+  for (const entity of [run.boat, run.castaway, run.wreck]) clean(entity)
 }
 
 function finish(message) {
@@ -406,6 +569,7 @@ function retry(player) {
   if (!run?.members.has(player) || !run.checkpoint) return
   if (run.contract.duoOnly && run.members.size < 2) return send(player, 'Espera a tu compañero para reintentar.')
   const checkpoint = run.checkpoint
+  run.receipt ||= run.id
   const vehicle = CreateVehicleServerSetter(GetHashKey(run.contract.vehicle), run.contract.type, ...checkpoint.at)
   if (!vehicle) return send(player, 'La plaza del punto de control no está disponible. Vuelve a intentarlo.')
   SetEntityOrphanMode(vehicle, 2)
@@ -432,22 +596,25 @@ function createPed(model, at) {
   return ped
 }
 
-function start(player, key, world = false) {
+function start(player, key, world = false, incident = null) {
   const ped = GetPlayerPed(player)
-  if (!near(ped, base, 8)) return send(player, 'Ve a la central para elegir contrato.')
+  if (incident ? !alive(ped) || !near(ped, incident.at, 35) : !near(ped, base, 8)) {
+    return send(player, incident ? 'Acércate al punto de encuentro.' : 'Ve a la central para elegir contrato.')
+  }
   if (run) return send(player, 'Ya hay un contrato. Tu companero puede incluirte con /unir en la central.')
-  const contract = world ? dailyWorld() : Object.hasOwn(contracts, key) && contracts[key]
-  if (world) key = contract.key
+  const contract = incident?.contract || (world ? dailyWorld() : Object.hasOwn(contracts, key) && contracts[key])
+  if (world || incident) key = contract.key
   if (!contract) return send(player, 'Contratos: ' + Object.keys(contracts).join(', '))
   if (contract.duoOnly && getPlayers().length < 2) return send(player, 'Esta operación requiere dos jugadores conectados.')
   const data = profile(player)
   if (!data) return send(player, 'No se pudo cargar tu perfil de FiveM.')
+  if (incident && data.incidents.includes(incident.id)) return send(player, 'Ya has cobrado este incidente.')
   if (chapterOf(key) > unlockedChapter(data)) return send(player, 'Completa primero los capítulos anteriores.')
-  const vehicle = CreateVehicleServerSetter(GetHashKey(contract.vehicle), contract.type, ...(contract.launch || garage))
+  const vehicle = CreateVehicleServerSetter(GetHashKey(contract.vehicle), contract.type, ...(key === 'proyecto_eclipse' ? Duo.eclipse.pad : key === 'guardacostas' ? Duo.sea.helipad : incident?.at || contract.launch || garage))
   if (!vehicle) return send(player, 'El vehiculo no se pudo crear. Prueba otra vez.')
   SetEntityOrphanMode(vehicle, 2)
   run = {
-    id: DuoStore.id(), key, contract, vehicle, step: 0, members: new Map([[player, profileKey(player)]]),
+    id: DuoStore.id(), key, contract, incident, vehicle, step: 0, members: new Map([[player, profileKey(player)]]),
     leadKey: profileKey(player), pairUntil: 0,
     names: new Map([[profileKey(player), GetPlayerName(String(player)) || 'Jugador 1']]),
     bonus: key === featuredContract() ? Math.floor(contract.pay / 4) : 0,
@@ -455,14 +622,32 @@ function start(player, key, world = false) {
     dialogue: contract.intro || '',
     passenger: 0, enemies: [], scene: [], sceneLoaded: false, engaged: false, created: Date.now()
   }
+  if (key === 'ultima_ambulancia') run.people = Duo.rescue.people.map(() => ({entity:0,boarded:false,lost:false}))
+  if (contract.heist) run.heist = DuoHeist.create()
+  if (key === 'proyecto_eclipse') {
+    run.handler = CreateVehicleServerSetter(GetHashKey('handler'),'automobile',...Duo.eclipse.handler)
+    if (!run.handler) return finish('Central: la grúa no está disponible.')
+    SetEntityOrphanMode(run.handler,2)
+  }
+  if (key === 'ultima_recogida') run.collected = []
+  if (key === 'guardacostas') {
+    run.wreckAt = Duo.sea.search[Math.floor(Math.random() * Duo.sea.search.length)]
+    run.boat = CreateVehicleServerSetter(GetHashKey('dinghy'), 'boat', ...Duo.sea.dock)
+    run.wreck = CreateVehicleServerSetter(GetHashKey('suntrap'), 'boat', ...run.wreckAt, 180)
+    if (!run.boat || !run.wreck) return finish('Central: rescate no disponible.')
+    for (const entity of [run.boat, run.wreck]) SetEntityOrphanMode(entity, 2)
+    FreezeEntityPosition(run.wreck, true)
+  }
   if (contract.passenger) {
     run.passenger = createPed(contract.passenger, currentStop().at)
     if (!run.passenger) return finish('No se pudo generar el pasajero.')
   }
-  send(player, contract.name + ' | Usa el vehiculo asignado. Tu companero puede usar /unir en la central.')
+  send(player, contract.name + (incident ? ' · Tu compañero puede unirse aquí antes de empezar.' :
+    ' | Usa el vehiculo asignado. Tu companero puede usar /unir en la central.'))
   sync()
   for (const id of getPlayers()) {
-    if (Number(id) !== player) send(Number(id), 'Invitación · ' + contract.name + '. Abre el cuartel para unirte.')
+    if (Number(id) !== player) send(Number(id), 'Invitación · ' + contract.name +
+      (incident ? '. Ve al punto de encuentro para unirte.' : '. Abre el cuartel para unirte.'))
   }
 }
 
@@ -478,12 +663,17 @@ function chooseRoute(player, value) {
 function join(player) {
   if (run?.members.has(player)) return
   if (!canJoin(player)) {
-    return send(player, 'Puedes unirte en la central antes del primer objetivo.')
+    return send(player, run?.incident ? 'Únete en el punto de encuentro antes de empezar.' :
+      'Puedes unirte en la central antes del primer objetivo.')
   }
+  if (run.resumePending && !run.resumePending.crew.includes(profileKey(player))) return send(player, 'Esta salida pertenece al equipo original.')
   if (!profile(player)) return send(player, 'No se pudo cargar tu perfil de FiveM.')
-  if (run.contract.duoOnly && run.leadKey === profileKey(player)) return send(player, 'Cada integrante necesita su propio perfil.')
+  if ((run.contract.duoOnly || run.incident) && run.leadKey === profileKey(player)) {
+    return send(player, 'Cada integrante necesita su propio perfil.')
+  }
   run.members.set(player, profileKey(player))
   run.names.set(profileKey(player), GetPlayerName(String(player)) || 'Jugador 2')
+  if (run.resumePending) return restoreShift(player)
   send(player, 'Te has unido al contrato.')
   sync()
 }
@@ -526,17 +716,20 @@ function spawnEscort(stop) {
 function completeContract(player) {
   const pending = {
     name: run.contract.name, pay: run.contract.pay + run.bonus, rallyTime: run.rallyTime || 0,
+    breakdown: run.heist ? { base: run.contract.pay, extra: run.bonus } : undefined,
     entries: Array.from(run.members.values(), key => {
       const data = DuoStore.load(key)
       const chapter = chapterOf(run.key)
       return { key, campaign: data && chapter >= 0 && chapter <= unlockedChapter(data) ? run.key : null,
-        operation: run.contract.duoOnly ? run.key : null }
+        heist: run.heist ? run.key : null, davis: run.neighbor, operation: run.contract.duoOnly && !run.heist ? run.key : null, incident: run.incident?.id || null }
     })
   }
-  if (!DuoStore.record(run.id, pending)) return send(player, 'No se pudo registrar el pago. Pulsa E para reintentar.')
-  const file = 'pago-' + run.id + '.json'
+  if (!DuoStore.record(run.receipt || run.id, pending)) return send(player, 'No se pudo registrar el pago. Pulsa E para reintentar.')
+  const file = 'pago-' + (run.receipt || run.id) + '.json'
   finish('Contrato completado. Procesando el pago…')
   notifyPayments(DuoStore.settle(file))
+  publishExhibit()
+  for (const id of getPlayers()) pushIncidents(Number(id))
 }
 
 function relayReady(player, ped) {
@@ -585,11 +778,21 @@ function confirmPair(player, stop, site) {
 
 function advance(player, value) {
   if (!run?.members.has(player) || run.failed || value?.id !== run.id || value?.step !== run.step) return
+  if (run.resumePending) return send(player, 'Espera al equipo original en el cuartel.')
   if (run.contract.duoOnly && run.members.size < 2) return send(player, 'Espera a tu compañero para continuar.')
+  if (run.people && run.step) return rescueStep(player)
+  if (run.heist && run.step > 0) {
+    if (run.step === 1) return send(player,'Abre la consola de tu puesto desde F6.')
+    if (!DuoHeist.canDeliver(run)) return send(player, run.handler ? 'Aterrizad los dos a bordo del Cargobob en la entrega.' : 'Acercad el vehículo y reuníos en la entrega.')
+    return completeContract(player)
+  }
+  if (run.key === 'guardacostas' && run.step > 0) return seaStep(player)
+  if (run.key === 'ultima_recogida' && run.step === 1) return pickupStep(player)
   pairExpired()
   const stop = currentStop()
   const ped = GetPlayerPed(player)
   const inRoute = run.step < run.contract.stops.length
+  const incidentDestination = run.incident && run.step === run.contract.stops.length - 1
   const rally = run.key === 'rally' && inRoute
   const pairStage = stop.briefing || stop.paired
   const sites = pairStage ? operationTargets(stop, player) : stopTargets(stop, run.members.size)
@@ -613,7 +816,13 @@ function advance(player, value) {
     return send(player, 'Detén la aeronave para cerrar el encargo.')
   }
   const radius = stop.air ? 105 : stop.gang || stop.search || stop.parallel || stop.paired ? 110 : 24
-  if (!near(run.vehicle, target.at, radius)) return send(player, 'Acerca el vehículo del contrato.')
+  if (!((run.key === 'guardacostas' || run.handler) && stop.briefing) && !near(run.vehicle, target.at, radius)) return send(player, 'Acerca el vehículo del contrato.')
+  if (run.incident && run.contract.kind !== 'Búsqueda' && run.members.size === 2) {
+    const lead = Array.from(run.members).find(([, key]) => key === run.leadKey)
+    if (!lead || GetPedInVehicleSeat(run.vehicle, -1) !== GetPlayerPed(lead[0]) || lead[0] === player) {
+      return send(player, 'El anfitrión conduce y el compañero confirma el objetivo.')
+    }
+  }
   if (stop.gang && (!run.engaged || run.enemies.some(enemy =>
     !DoesEntityExist(enemy) || GetEntityHealth(enemy) > 0
   ))) return send(player, 'Todavía hay miembros de la banda en la zona.')
@@ -622,6 +831,7 @@ function advance(player, value) {
     return send(player, 'Deja espacio atrás y espera a que suba el pasajero.')
   }
   if (!inRoute) {
+    if (run.key === 'ultima_recogida' && GetEntitySpeed(run.vehicle) > 1) return send(player, 'Detén la furgoneta.')
     if (run.contract.duoOnly && Array.from(run.members.keys()).some(member => {
       const teammate = GetPlayerPed(member)
       return !alive(teammate) || !near(teammate, garage, 12)
@@ -658,17 +868,31 @@ function advance(player, value) {
   }
   if (run.tow && !stop.tow) {
     if (!near(run.tow, stop.at, 16)) return send(player, 'Entrega también el coche remolcado.')
+    if (incidentDestination) return completeContract(player)
     clean(run.tow)
     run.tow = 0
   }
   if (run.escort && !stop.escort) {
     if (!near(run.escort.vehicle, stop.at, 20)) return send(player, 'Espera a la furgoneta de los estibadores.')
+    if (incidentDestination) return completeContract(player)
     clean(run.escort.driver)
     clean(run.escort.vehicle)
     run.escort = undefined
   }
   if (stop.escort && !spawnEscort(stop)) return failure('No se pudo generar el transporte de los estibadores.')
+  if (incidentDestination) return completeContract(player)
 
+  if (run.key === 'noche_davis' && run.step === 0) {
+    if (run.choice === 2 && GetPedInVehicleSeat(run.vehicle,1))
+      return send(player,'Rosa necesita el asiento trasero derecho. Dejadlo libre.')
+    run.neighbor = run.choice
+    run.returnVisit = DuoStore.load(run.leadKey)?.davis?.includes(run.neighbor) || false
+    if (run.neighbor === 2) {
+      run.passenger = CreatePedInsideVehicle(run.vehicle,4,GetHashKey('a_f_m_tourist_01'),1,true,true)
+      if (!run.passenger) return failure('Dejad libre el asiento trasero para Rosa y volved a iniciar su traslado.')
+      SetEntityOrphanMode(run.passenger,2)
+    }
+  }
   clearStageEntities()
   run.engaged = false
   run.searched.clear()
@@ -695,6 +919,8 @@ function advance(player, value) {
       relayDriver: run.relayDriver, timed: !!run.deadline, dialogue: run.dialogue
     }
   }
+  if (stop.checkpoint) saveCheckpoint()
+  if (run.key === 'ultima_recogida' && run.step === 1) run.opened = Date.now()
   if (run.rallyTime) {
     for (const member of run.members.keys()) {
       send(member, 'Meta: ' + (run.rallyTime / 1000).toFixed(1) + ' s. Devolved el coche.')
@@ -703,10 +929,198 @@ function advance(player, value) {
   sync()
 }
 
+function saveCheckpoint() {
+  const data = DuoStore.load(run.leadKey)
+  if (!data) return
+  run.receipt ||= run.id
+  data.checkpoint = { key: run.key, receipt: run.receipt, crew: [...run.members.values(), ...run.disconnected.keys()],
+    point: run.checkpoint, bonus: run.bonus }
+  if (!DuoStore.save(run.leadKey, data)) {
+    for (const p of run.members.keys()) send(p, 'Punto disponible esta sesión. El guardado en disco ha fallado.')
+  }
+}
+
+function resumeShift(player) {
+  const data = profile(player)
+  const saved = data?.checkpoint
+  if (run || !saved || data.receipts.includes(saved.receipt) || !contracts[saved.key] ||
+      !saved.point || !Array.isArray(saved.crew)) return
+  start(player, saved.key)
+  if (!run) return
+  run.resumePending = saved
+  run.receipt = saved.receipt
+  if (saved.crew.length === 1) return restoreShift(player)
+  send(player, 'Tu compañero original debe unirse en Pillbox para recuperar el vehículo.')
+}
+
+function restoreShift(player) {
+  const saved = run.resumePending
+  run.checkpoint = saved.point
+  run.bonus = saved.bonus
+  retry(player)
+  if (run.step === saved.point.step) {
+    run.started = true
+    delete run.resumePending
+  } else finish('No se pudo restaurar el vehículo. El punto sigue disponible en F6.')
+}
+
+function dispatchView(player) {
+  if (run?.key !== 'ultima_recogida' || run.step !== 1 || !run.members.has(player)) return null
+  return { editable: run.members.get(player) !== run.leadKey && run.members.size === 2,
+    boxes: run.bonus / 320, selected: run.pick, stops: Duo.pickups.map((site, i) => ({
+      name: site.text, boxes: site.boxes, seconds: Math.max(0, Math.ceil((run.opened + site.closes * 1000 - Date.now()) / 1000)),
+      collected: run.collected.includes(i) })) }
+}
+
+function dispatch(player, value) {
+  const sheet = dispatchView(player)
+  if (!sheet?.editable) return
+  if (value === 'return') {
+    if (!run.collected.length) return finish('Ruta cerrada sin recogidas ni pago.')
+    run.step++
+    run.pick = undefined
+  } else {
+    if (!Number.isInteger(value) || !sheet.stops[value]?.seconds || sheet.stops[value].collected) return
+    run.pick = value
+  }
+  sync()
+  for (const p of run.members.keys()) send(p, value === 'return' ? 'Regreso al cuartel' : 'Siguiente recogida · ' + Duo.pickups[value].text)
+}
+
+function pickupStep(player) {
+  const site = Duo.pickups[run.pick]
+  if (!site || run.collected.includes(run.pick) || Date.now() >= run.opened + site.closes * 1000) return
+  const driver = [...run.members].find(([, key]) => key === run.leadKey)[0]
+  if (player === driver) return send(player, 'El copiloto recoge los bultos.')
+  if (GetPedInVehicleSeat(run.vehicle, -1) !== GetPlayerPed(driver) || GetEntitySpeed(run.vehicle) > 1)
+    return send(player, 'El conductor debe detener la furgoneta.')
+  const ped = GetPlayerPed(player)
+  if (!alive(ped) || !near(ped, site.at, 7) || !near(run.vehicle, site.at, 12) || GetVehiclePedIsIn(ped,false))
+    return send(player, 'Baja junto al comercio para cargar los bultos.')
+  run.collected.push(run.pick)
+  run.bonus += 320 * site.boxes
+  run.pick = undefined
+  if (run.collected.length === Duo.pickups.length) run.step++
+  sync()
+}
+
+function seaStep(player) {
+  const ped = GetPlayerPed(player)
+  if (!alive(ped) || !alive(run.boat) || (run.castaway && !alive(run.castaway))) return failure('El equipo de rescate se ha perdido.')
+  const pilot = run.members.get(player) === run.leadKey
+  if (run.step === 1) {
+    if (!pilot || GetPedInVehicleSeat(run.vehicle,-1) !== ped || !near(ped, run.wreckAt, 95))
+      return send(player, pilot ? 'Vuela sobre la embarcación asignada.' : 'Espera a que el piloto localice el barco.')
+    run.castaway = CreatePedInsideVehicle(run.wreck, 4, GetHashKey('a_m_m_beach_01'), -1, true, true)
+    if (!run.castaway) return send(player,'Mantén el Maverick sobre el barco y confirma de nuevo.')
+    SetEntityOrphanMode(run.castaway,2)
+    run.dialogue = 'Barco localizado. Acerca la lancha al costado.'
+  } else {
+    if (pilot || GetPedInVehicleSeat(run.boat,-1) !== ped || GetEntitySpeed(run.boat) > 2)
+      return send(player, 'El patrón debe detener la lancha.')
+    if (!near(run.boat, run.step === 2 ? run.wreckAt : Duo.sea.dock, 12)) return
+    if (run.step === 2) {
+      if (GetVehiclePedIsIn(run.castaway,false) !== run.boat) SetPedIntoVehicle(run.castaway, run.boat, 0)
+      if (GetVehiclePedIsIn(run.castaway,false) !== run.boat) return send(player,'Embarcando. Mantén la lancha parada y confirma cuando esté a bordo.')
+      run.dialogue = 'Volved al embarcadero con el náufrago.'
+    } else {
+      if (GetVehiclePedIsIn(run.castaway,false) !== run.boat) {
+        run.step = 2
+        sync()
+        return send(player, 'Recoge al náufrago antes de volver.')
+      }
+      return completeContract(player)
+    }
+  }
+  run.step++
+  sync()
+}
+
+function shiftView(player, data) {
+  if (!data) return null
+  const favorite = data.favorite
+  const model = favorite && Object.hasOwn(cars,favorite.model) && !cars[favorite.model].type && data.cars[favorite.model]
+    ? favorite.model : Object.keys(data.cars).find(key => Object.hasOwn(cars,key) && !cars[key].type) || 'blista'
+  const color = favorite?.model === model ? favorite.paint : data.cars[model]
+  const paint = Object.hasOwn(paints,color) ? color : 'grafito'
+  const food = Object.hasOwn(items,data.pocket) && items[data.pocket].heal ? data.pocket : 'bocadillo'
+  const missing = Math.max(0, 3 - (data.food[food] || 0))
+  return { model, paint, food, missing, cost: missing * items[food].price }
+}
+
+function setupShift(player, action, value) {
+  const data = profile(player)
+  if (!data) return
+  if (action === 'pocket' && Object.hasOwn(items, value) && items[value].heal) data.pocket = value
+  else if (action === 'favoriteCar' && Object.hasOwn(cars,value) && !cars[value].type && data.cars[value])
+    data.favorite = { model: value, paint: data.cars[value] }
+  else if (action === 'prepareShift') {
+    const setup = shiftView(player, data)
+    if (!near(GetPlayerPed(player),motorPool,18)) return send(player,'Prepara tu salida junto al garaje.')
+    if (value !== setup.cost) return send(player,'El coste ha cambiado. Revisa la salida.')
+    if (data.cash < setup.cost) return send(player,'Saldo insuficiente para reponer la mochila.')
+    const active = personalCars.get(player)
+    if (active && (active.model !== setup.model || !alive(active.entity) || !near(active.entity,motorPool,32))) return send(player,'Guarda o recupera primero tu coche actual.')
+    data.cars[setup.model] = setup.paint
+    if (!active) handleGarage(player,'pull',setup.model,data)
+    const car = personalCars.get(player)
+    if (!car) return
+    data.cash -= setup.cost
+    data.food[setup.food] = (data.food[setup.food] || 0) + setup.missing
+    if (!save(player,data)) {
+      if (!active) { clean(car.entity); personalCars.delete(player) }
+      return send(player,'No se pudo guardar la salida.')
+    }
+    Entity(car.entity).state.set('duoPaint', paints[setup.paint].rgb,true)
+    return send(player,'Salida preparada. Tu coche y tu mochila están listos.')
+  } else return
+  if (!save(player,data)) return send(player,'No se pudo guardar la preferencia.')
+  if (action === 'favoriteCar') publishExhibit()
+  send(player,'Preferencia guardada.')
+}
+
+function publishExhibit(player = -1) {
+  const gallery = DuoStore.gallery().map(data => ({
+    model: data.favorite?.model || 'blista', paint: data.favorite?.paint || 'grafito',
+    trophies: ['La central','Frecuencia fantasma'].filter((_,i) => (i ? Duo.chapters.slice(Duo.story2.start) :
+      Duo.chapters.slice(0,Duo.story2.start)).every(ch => ch.missions.every(k => data.campaign.includes(k))))
+  }))
+  emitNet('duo:exhibit',player,gallery)
+}
+
+function expireHeist() {
+  const expiry = DuoHeist.expire(run)
+  if (expiry === 'failed') finish('Alerta completa. Atraco cerrado sin botín.')
+  if (expiry === 'return') {
+    for (const player of run.members.keys()) send(player,'Tiempo agotado. Entregad el botín asegurado.')
+    sync()
+  }
+  return !!expiry
+}
+
 function route(player, action, value) {
-  if (Date.now() - (lastAction.get(player) || 0) < 600) return
+  if (Date.now() - (lastAction.get(player) || 0) < (action === 'heistInput' ? 140 : 600)) return
   lastAction.set(player, Date.now())
+  if (action === 'heistInput' && run?.heist && run.members.has(player)) {
+    if (expireHeist()) return
+    const result = DuoHeist.act(run,player,value)
+    if (typeof result === 'string') return send(player,result)
+    if (result && !expireHeist()) sync()
+    return
+  }
+  if (action === 'resumeShift') return resumeShift(player)
+  if (action === 'dispatch') return dispatch(player, value)
+  if (['pocket', 'favoriteCar', 'prepareShift'].includes(action)) return setupShift(player, action, value)
+  if (action === 'quickEat') { action = 'eat'; value = profile(player)?.pocket || 'bocadillo' }
   if (action === 'start' && typeof value === 'string') return start(player, value)
+  if (action === 'markIncident' || action === 'startIncident') {
+    const reserved = action === 'markIncident' && value && run?.incident?.id === value ? run.incident : null
+    const offer = reserved || incidentOffers().find(incident => incident.id === value)
+    if (!offer) return send(player, 'La oferta ha caducado. Consulta los nuevos incidentes.')
+    if (action === 'startIncident') return start(player, null, false, offer)
+    emitNet('duo:locateCar', player, offer.at)
+    return send(player, 'Incidente marcado en el GPS.')
+  }
   if (action === 'locateHangar') {
     emitNet('duo:locateCar', player, Duo.hangar.at)
     return send(player, 'Hangar de Sandy Shores marcado en el GPS.')
@@ -721,10 +1135,28 @@ function route(player, action, value) {
   }
   if (action === 'join') return join(player)
   if (action === 'step') return advance(player, value)
+  if (action === 'rescueRole') {
+    if (!run?.people || run.step !== 0 || value?.id !== run.id || !run.members.has(player) ||
+        run.members.size !== 2 || run.confirmed.size || !near(GetPlayerPed(player),base,7)) return
+    const self = run.members.get(player)
+    if (value.role === 'driver') run.rescueDriver = self
+    else if (value.role === 'rescuer') run.rescueDriver = [...run.members.values()].find(key => key !== self)
+    else return
+    sync()
+    for (const id of run.members.keys()) panel(id)
+    return
+  }
   if (action === 'confirmBriefing' && run && currentStop().briefing) return advance(player, value)
   if (action === 'retry') return retry(player)
   if (action === 'chooseRoute') return chooseRoute(player, value)
-  if (action === 'cancel' && run && run.members.has(player)) return finish('Contrato cancelado.')
+  if (action === 'cancel' && run && run.members.has(player)) {
+    const owner = DuoStore.load(run.leadKey)
+    if (owner?.checkpoint?.receipt === (run.receipt || run.id)) {
+      delete owner.checkpoint
+      if (!DuoStore.save(run.leadKey, owner)) return send(player, 'No se pudo guardar la cancelación.')
+    }
+    return finish('Contrato cancelado.')
+  }
   const garageAction = ['buyCar', 'paint', 'pull', 'park', 'locateCar', 'recoverCar'].includes(action)
   if (!garageAction && !['buy', 'eat', 'balance', 'locate', 'claim'].includes(action)) return
   const data = profile(player)
@@ -773,9 +1205,20 @@ onNet('duo:action', (action, value) => {
   route(player, action, value)
   panel(player)
 })
+const lastPing = new Map()
+onNet('duo:ping', coordinates => {
+  const sender = Number(global.source)
+  if (Date.now() - (lastPing.get(sender) || 0) < 1500 || !Array.isArray(coordinates) ||
+      coordinates.length !== 3 || !coordinates.every(Number.isFinite) || Math.abs(coordinates[0]) > 9000 ||
+      Math.abs(coordinates[1]) > 10000 || Math.abs(coordinates[2]) > 1800) return
+  lastPing.set(sender, Date.now())
+  for (const id of getPlayers()) if (Number(id) !== sender) emitNet('duo:ping', Number(id), coordinates)
+})
 onNet('duo:panel', () => panel(Number(global.source)))
 onNet('duo:ready', () => {
   const player = Number(global.source)
+  pushIncidents(player)
+  publishExhibit(player)
   emitNet('duo:crew', -1, getPlayers().length)
   const weapons = profile(player)?.weapons || []
   emitNet('duo:loadout', player, weapons.filter(key => typeof key === 'string' && Object.hasOwn(items, key) && items[key].weapon))
@@ -784,6 +1227,10 @@ onNet('duo:ready', () => {
   if (expiry && Date.now() < expiry) {
     run.disconnected.delete(key)
     run.members.set(player, key)
+    if (run.heist?.pausedMs) {
+      run.heist.expires = Date.now()+run.heist.pausedMs
+      delete run.heist.pausedMs
+    }
     send(player, 'Te has reincorporado al contrato.')
     sync()
   } else sync(player)
@@ -792,12 +1239,17 @@ on('playerDropped', () => {
   const player = Number(global.source)
   emitNet('duo:crew', -1, getPlayers().filter(id => Number(id) !== player).length)
   lastAction.delete(player)
+  lastPing.delete(player)
   clean(personalCars.get(player)?.entity)
   personalCars.delete(player)
   clean(personalAircraft.get(player)?.entity)
   personalAircraft.delete(player)
   const key = run?.members.get(player)
   if (!key) return
+  if (run.heist?.expires) {
+    run.heist.pausedMs = Math.max(1,run.heist.expires-Date.now())
+    run.heist.expires = 0
+  }
   run.members.delete(player)
   if (!run.members.size) return finish('Contrato cerrado.')
   if (run.contract.duoOnly) {
@@ -843,6 +1295,22 @@ on('playerConnecting', (_name, _reject, deferrals) => {
 
 notifyPayments(DuoStore.recover())
 setInterval(() => notifyPayments(DuoStore.recover()), 10000)
+let lastIncidentWindow = incidentWindow()
+setInterval(() => {
+  const window = incidentWindow()
+  if (run?.key === 'ultima_recogida' && run.step === 1 && run.pick !== undefined &&
+      Date.now() >= run.opened + Duo.pickups[run.pick].closes * 1000) {
+    run.pick = undefined
+    sync()
+    for (const p of run.members.keys()) send(p, 'El comercio ha cerrado. Consultad la hoja de ruta.')
+  }
+  if (window === lastIncidentWindow) return
+  lastIncidentWindow = window
+  for (const id of getPlayers()) {
+    pushIncidents(Number(id))
+    panel(Number(id))
+  }
+}, 3000)
 
 setInterval(() => {
   if (!run) return
@@ -853,6 +1321,12 @@ setInterval(() => {
     }
   }
   if (run.contract.duoOnly && run.disconnected.size) return
+  if (run.heist && expireHeist()) return
+  if (run.handler && run.step < 2 && !alive(run.handler)) return failure('Grúa del prototipo perdida.')
+  if (run.handler && run.step === 1) {
+    const seats = [run.vehicle,run.handler].map(entity => GetPedInVehicleSeat(entity,-1)).join('/')
+    if (run.seats !== seats) { run.seats = seats; sync() }
+  }
   pairExpired()
   if (run.failed) {
     if (Date.now() - run.failed.at > 10 * 60 * 1000) finish('Se agotó el plazo de reintento.')
@@ -866,12 +1340,19 @@ setInterval(() => {
   if (run.passenger && (!DoesEntityExist(run.passenger) || GetEntityHealth(run.passenger) <= 0)) {
     return failure('Pasajero perdido.')
   }
+  if (run.key === 'guardacostas' && (!alive(run.boat) || !alive(run.wreck) || (run.castaway && !alive(run.castaway)))) return failure('Rescate interrumpido.')
   if (run.tow && !alive(run.tow)) return failure('Se perdió el coche averiado.')
   if (run.escort && (!alive(run.escort.vehicle) || !alive(run.escort.driver))) {
     return failure('La escolta no pudo llegar al destino.')
   }
+  if (run.people && run.step) return rescueTick()
   if (run.enemies.some(enemy => !DoesEntityExist(enemy))) return failure('Se perdió una entidad del encuentro.')
   const stop = currentStop()
+  if (run.key === 'guardacostas' && run.step === 1 && run.members.size === 2 && !run.pilotReady &&
+      GetPedInVehicleSeat(run.vehicle,-1) === GetPlayerPed([...run.members].find(([,key]) => key === run.leadKey)?.[0] || 0)) {
+    run.pilotReady = true
+    sync()
+  }
   loadScene(stop)
   if (stop.tow && !run.tow && Array.from(run.members.keys()).some(player => near(GetPlayerPed(player), stop.at, 70))) {
     if (!prepareTow(stop)) return failure('No se pudo generar el coche averiado.')

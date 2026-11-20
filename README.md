@@ -2,7 +2,40 @@
 
 Servidor cooperativo para **dos jugadores en GTA V Legacy** con chat, garaje, trabajos, bandas, exploración y campaña. El anfitrión ejecuta FXServer en Windows. Ambos necesitan GTA V Legacy y el cliente [FiveM](https://docs.fivem.net/docs/getting-started/installing-fivem/).
 
-**Versión candidata 0.7 · Interfaz táctica.** Hay 39 misiones fijas y un evento diario con nueve variantes. La interfaz cuenta con pruebas offline y queda pendiente de una sesión en FiveM Legacy.
+**Versión candidata 0.10 · Atracos de Pillbox.** Hay 46 misiones fijas, un encargo diario y tres ofertas de incidentes en ruta que rotan cada 20 minutos. La validación dentro de FiveM Legacy sigue pendiente.
+
+Para el primer arranque con dos clientes, seguid [la hoja de pruebas Legacy](PRUEBAS-LEGACY.md). En **F6 → Operaciones → Última ambulancia**, el rescatista localiza los civiles y confirma a pie; el conductor acerca la ambulancia y espera al volante. Tras la primera recogida podéis entregar en el hospital de Pillbox o intentar la segunda.
+
+### Atracos cooperativos · 0.10
+
+En **F6 → Atracos**, uno prepara el encargo y el otro se une en Pillbox. Confirmad ambos la salida. El anfitrión toma el primer papel. Intercambiad quién prepara la partida para probar el segundo.
+
+| Atraco | Interacción | Pago por jugador |
+| --- | --- | --- |
+| Caja de cierre | Desde vuestros puestos en la tienda, un jugador dicta su secuencia por Teams y el otro pulsa los símbolos en el dial. | $1.350 + $650 opcionales |
+| Cámara de ecos | Cada terminal muestra un tablero. Un jugador lee el eco y el otro lo introduce. Los papeles se alternan con cada acierto. | $2.700 + $1.250 opcionales |
+| Proyecto Eclipse | En Zancudo, el piloto lee emblemas desde el Cargobob. El operador selecciona la carga desde la Handler. El piloto acopla el cable sobre la grúa con **E** desde la cabina. El operador embarca y ambos aterrizan en la entrega de LSIA. | $4.200 |
+
+En la tienda y el banco, pulsa **E** en el puesto o abre **F6 → Cuartel general** para acceder a tu consola. Tras la primera caja podéis entregar o votar los dos por la extra. Un error cambia la combinación y consume diez segundos. Si se agota el tiempo antes de asegurar la base, el atraco termina sin pago. Si ya hay botín, volved juntos en el vehículo asignado a Pillbox para cobrar. La liquidación desglosa base y extra. En una desconexión individual, la alerta se pausa durante el periodo de reincorporación del compañero.
+
+El selector de la vista previa local incluye las consolas de los tres atracos y ambos jugadores. Los tiempos del tablón son estimaciones. El posicionamiento en interiores, el manejo de la grúa y el vuelo con carga quedan pendientes de la prueba con dos clientes Legacy.
+
+### Turnos de Pillbox · 0.9
+
+- **Última recogida** está en **F6 → Operaciones**. Confirmad en la central. El copiloto usa la hoja de ruta de F6 para elegir o cambiar de comercio. El conductor detiene la furgoneta y el copiloto baja a recoger los bultos. Cada bulto vale $320 por persona. Podéis cerrar la ruta antes de tiempo y entregar lo recogido en el garaje. Una ruta vacía se cierra sin pago.
+- **Guardacostas de Alamo Sea** sale de la misma mesa. El anfitrión toma el Maverick en Sandy Shores. El segundo jugador recoge la Dinghy en el lago. Una vez localizado el barco, el piloto conserva la referencia aérea para guiar al patrón por Teams. El patrón se acerca, detiene la lancha, embarca al náufrago y vuelve al embarcadero.
+- **Una noche en Davis** está en **F6 → Mundo libre → Trabajo**. Elegid a quién ayudar y volved a visitar al mismo vecino tras cobrar. El servidor recuerda los favores en cada perfil. La siguiente salida usa los contactos del anfitrión.
+- **F7** comparte durante 30 segundos vuestro destino del mapa o, si no hay destino, vuestra posición. **F9** consume el alimento asignado en la ficha de comida. Podéis reasignar ambas teclas en los ajustes de FiveM.
+- En la ficha de un coche propio, guardad el modelo y su pintura favorita. **F6 → Cuartel → Salida habitual**, junto al garaje, muestra el precio de completar tres unidades del alimento favorito y prepara el vehículo. Las plazas de exposición enseñan los favoritos y la mesa muestra los recuerdos de campaña.
+- El tablón indica jugadores, distancia al punto de inicio y duración estimada. Los tiempos son orientativos hasta medirlos en Legacy. La vista previa del navegador incluye **Hoja de ruta del dúo** y permite alternar conductor y copiloto.
+
+### Incidentes en ruta
+
+Abre **F6 → Exploración** para ver la oferta de Ciudad, Puerto y sur, y Blaine County. Puedes marcar el encuentro desde lejos. Al acercarte, acepta en el panel y deja que tu compañero se una en el mismo lugar antes de confirmar el primer objetivo.
+
+En **Auxilio** y **Escolta**, el anfitrión conduce y su compañero confirma las etapas. En **Búsqueda**, el dúo recibe una pista de oeste a este y otra de sur a norte. También puedes completar cualquiera de las variantes en solitario.
+
+El pago se entrega al cumplir el último objetivo en el destino. Después, el tablero destaca el incidente vigente más cercano que aún puedes cobrar. Si cambia la rotación, el encargo aceptado conserva su ruta y el compañero puede reincorporarse como en los demás contratos.
 
 ## Primera partida local
 
@@ -51,7 +84,7 @@ Acércate a pie y pulsa **E** para abrir la estación cuando no tengas un encarg
 
 ### Operaciones para dos
 
-Desde **F6 → Operaciones**, un jugador prepara la salida y el otro se une al contrato. Ambos pulsan **Confirmar salida** junto al tablón. En el menú podéis consultar vuestro papel y cuántas confirmaciones faltan. Volved los dos al cuartel para registrar y cobrar el encargo.
+Desde **F6 → Operaciones**, un jugador prepara la salida y el otro se une al contrato. Ambos pulsan **Confirmar salida** junto al tablón. En el menú podéis consultar vuestro papel y cuántas confirmaciones faltan. Volved los dos al cuartel para registrar y cobrar las operaciones terrestres. En Guardacostas, el cierre se hace en el embarcadero.
 
 | Operación | Objetivo de equipo | Pago por persona |
 | --- | --- | ---: |
@@ -99,7 +132,7 @@ Esta historia se desbloquea al completar la primera campaña. Cada jugador conse
 
 Las introducciones y los subtítulos dan el contexto de cada encargo. Compartid las pistas que reciba cada jugador. Los objetivos separados se pueden confirmar en paralelo en dúo o uno tras otro en solitario. En las etapas de rutas alternativas, seguid uno de los puntos marcados. Las dos rutas del final permiten cerrar la historia, y se puede repetir el encargo para probar la otra.
 
-Cuando una misión larga haya guardado un punto intermedio, consulta **F6 → Campaña** para ver si puedes reintentar desde allí. Ese punto pertenece a la partida activa. El pago y el avance permanente se guardan al cerrar el encargo.
+Cuando una misión larga haya guardado un punto intermedio, consulta **F6 → Campaña** para ver si puedes reintentar desde allí. El último punto seguro se guarda en el perfil del anfitrión. Tras salir ambos o reiniciar el servidor, el anfitrión puede elegir **F6 → Cuartel → Reanudar en Pillbox**. Si jugaban dos personas, el compañero original se une en el cuartel. Cancelar el contrato descarta ese punto. El pago y el avance permanente se guardan al cerrar el encargo.
 
 ### Contratos y exploración
 

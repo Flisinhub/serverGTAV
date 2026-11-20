@@ -8,12 +8,15 @@ let configured = new Set()
 let notice = { text: '', until: 0 }
 
 const panelActions = new Set(['start', 'join', 'cancel', 'buy', 'eat', 'buyCar', 'pull', 'park', 'paint', 'locate', 'locateCar', 'recoverCar',
-  'startWorld', 'retry', 'chooseRoute', 'locateHangar', 'locateHQ', 'confirmBriefing'])
+  'rescueRole', 'heistInput', 'favoriteCar', 'pocket', 'prepareShift', 'resumeShift', 'dispatch', 'startWorld', 'startIncident', 'markIncident', 'retry', 'chooseRoute', 'locateHangar', 'locateHQ', 'confirmBriefing'])
 let panelOpen = false
 const hud = { heartbeat: -Infinity, visible: false, sampleAt: -Infinity, telemetry: '', prompt: '',
   control: null, key: '', keyAt: -Infinity, retryAt: 0, reportAt: 0 }
 let cache
 let cacheZone
+let nearbyIncidents = []
+let lastNearbyIncident
+onNet('duo:incidents', offers => { nearbyIncidents = offers })
 onNet('duo:cache', next => {
   if (cacheZone) RemoveBlip(cacheZone)
   cacheZone = 0
@@ -87,6 +90,7 @@ nui('accion', data => {
 })
 
 onNet('duo:panel', snapshot => {
+  if (Array.isArray(snapshot.incidents)) nearbyIncidents = snapshot.incidents
   SendNuiMessage(JSON.stringify({ type: 'snapshot', snapshot }))
 })
 onNet('duo:crew', count => {
@@ -100,6 +104,129 @@ on('onClientResourceStop', resource => {
 RegisterCommand('central', () => openPanel(), false)
 RegisterKeyMapping('central', 'Abrir la central de Los Santos a Dos', 'keyboard', 'F6')
 
+let sharedPin
+let gallery = []
+const scenery = new Map()
+const incidentArt = {
+  Vecino: [['a_f_m_tourist_01',1,1,'WORLD_HUMAN_STAND_MOBILE']],
+  Auxilio: [['prop_roadcone02a',1,1], ['s_m_y_xmech_01',2,-1,'WORLD_HUMAN_CLIPBOARD']],
+  Búsqueda: [['prop_boxpile_06b',2,1], ['a_m_y_business_02',-2,1,'WORLD_HUMAN_STAND_MOBILE']],
+  Escolta: [['prop_boxpile_04a',2,1], ['s_m_m_dockwork_01',-2,0,'WORLD_HUMAN_CLIPBOARD']]
+}
+function clearProp(key) {
+  const prop = scenery.get(key)
+  if (prop) DeleteEntity(prop.entity)
+  scenery.delete(key)
+}
+function sceneEntity(key, model, at, kind, scenario, rgb) {
+  const signature = [model, ...at, ...(rgb || [])].join(':')
+  if (scenery.get(key)?.signature === signature) return
+  clearProp(key)
+  const hash = GetHashKey(model)
+  if (!IsModelInCdimage(hash) || !IsModelValid(hash)) return
+  if (!HasModelLoaded(hash)) { RequestModel(hash); return }
+  const [x,y,z,heading = 0] = at
+  const entity = kind === 'vehicle' ? CreateVehicle(hash,x,y,z,heading,false,false) :
+    kind === 'ped' ? CreatePed(4,hash,x,y,z,heading,false,false) : CreateObjectNoOffset(hash,x,y,z,false,false,false)
+  if (entity) {
+    SetEntityAsMissionEntity(entity,true,true)
+    SetEntityHeading(entity,heading)
+    FreezeEntityPosition(entity,true)
+    SetEntityCollision(entity,false,false)
+    if (kind === 'vehicle') {
+      SetVehicleDoorsLocked(entity, 2)
+      SetVehicleUndriveable(entity,true)
+      SetVehicleCustomPrimaryColour(entity,...rgb)
+      SetVehicleCustomSecondaryColour(entity,...rgb)
+    } else if (kind === 'ped') {
+      SetBlockingOfNonTemporaryEvents(entity,true)
+      SetEntityInvincible(entity,true)
+      TaskStartScenarioInPlace(entity,scenario,0,true)
+    }
+    scenery.set(key,{ signature,entity })
+  }
+  SetModelAsNoLongerNeeded(hash)
+}
+function streamScenery() {
+  const coords = GetEntityCoords(PlayerPedId())
+  const wanted = new Set()
+  function place(key, ...args) { wanted.add(key); sceneEntity(key,...args) }
+  if (distance(coords,base) < 70) {
+    gallery.forEach((car,i) => {
+      if (!Duo.cars[car.model] || !Duo.paints[car.paint]) return
+      place('car'+i,car.model,Duo.exhibit[i],'vehicle',null,Duo.paints[car.paint].rgb)
+    })
+    for (const [i,name] of ['La central','Frecuencia fantasma'].entries()) {
+      if (gallery.some(car => car.trophies.includes(name)))
+        place('award'+i,'prop_trophy_gold',[-44.65+i*.5,-1102.85,26.24,70],'object')
+    }
+  }
+  if (state?.cargo) {
+    const model = 'prop_container_01a'
+    Duo.eclipse.cargo.forEach((at,index) => {
+      if (state.cargo.lifted !== index && distance(coords,at)<220)
+        place('eclipse-'+index,model,[at[0],at[1],at[2]-1,0],'object')
+    })
+    const carrier = resolve(state.cargo.onCrane ? state.crane : state.vehicle)
+    if (carrier && state.cargo.lifted !== null) {
+      // Local replica follows the networked aircraft on each client, including after streaming back in.
+      const key = 'eclipse-load'
+      wanted.add(key)
+      if (!scenery.has(key)) sceneEntity(key,model,GetEntityCoords(carrier),'object')
+      const box = scenery.get(key)?.entity
+      if (box && !IsEntityAttachedToEntity(box,carrier)) {
+        FreezeEntityPosition(box,false)
+        AttachEntityToEntity(box,carrier,0,0,state.cargo.onCrane ? 4 : 0,state.cargo.onCrane ? 1 : -5,0,0,0,false,false,false,false,2,true)
+      }
+    }
+  }
+  const scenes = state?.sceneAt ? [{ at:state.sceneAt, kind:state.incidentKind, id:state.id }] :
+    state ? [] : nearbyIncidents.filter(offer => !offer.completed && offer.expires > Date.now())
+  for (const scene of scenes.filter(s => distance(coords,s.at)<65)) {
+    for (const [model,dx,dy,scenario] of incidentArt[scene.kind] || []) {
+      place(scene.id+model,model,[scene.at[0]+dx,scene.at[1]+dy,scene.at[2]-1,70],scenario?'ped':'object',scenario)
+    }
+  }
+  for (const key of scenery.keys()) if (!wanted.has(key)) clearProp(key)
+}
+onNet('duo:exhibit', cars => { gallery = cars })
+RegisterCommand('bolsillo', () => { if (initialized && !panelOpen && !IsEntityDead(PlayerPedId())) request('quickEat') }, false)
+RegisterKeyMapping('bolsillo','Consumir comida del bolsillo','keyboard','F9')
+RegisterCommand('marcarduo', () => {
+  if (!initialized || panelOpen || IsEntityDead(PlayerPedId())) return
+  const waypoint = GetFirstBlipInfoId(8)
+  const at = waypoint && DoesBlipExist(waypoint) ? GetBlipCoords(waypoint) : GetEntityCoords(PlayerPedId())
+  emitNet('duo:ping',at)
+  notify('Marca enviada al compañero.')
+}, false)
+RegisterKeyMapping('marcarduo','Compartir destino del mapa o posición actual','keyboard','F7')
+onNet('duo:ping', at => {
+  if (sharedPin) RemoveBlip(sharedPin.pin)
+  sharedPin = { pin:blip(at,'Marca del compañero',162,3), at, until:GetGameTimer()+30000 }
+  notify('Tu compañero ha marcado un punto.')
+})
+function worldLabel(at,text) {
+  const [visible,x,y] = GetScreenCoordFromWorldCoord(...at)
+  if (visible) { SetTextCentre(true); label(x,y,text,.33); SetTextCentre(false) }
+}
+function drawHeadquarters(coords) {
+  if (!Duo.exhibit || distance(coords,base)>50) return
+  const [x,y,z] = base
+  const desk = Duo.hq.find(station => station.tab === 'operations').at
+  worldLabel([desk[0],desk[1],desk[2]+1.0],'MESA DE DESPACHO')
+  if (distance(coords,desk)<4) {
+    const awards = [...new Set(gallery.flatMap(car => car.trophies))]
+    if (awards.length) worldLabel([-44.35,-1102.85,26.65],awards.join('  /  '))
+  }
+  DrawLightWithRange(x,y,z+2,170,235,105,9,2)
+  worldLabel([x,y,z+2.25],'PILLBOX  /  CENTRAL DE OPERACIONES')
+  worldLabel([motorPool[0],motorPool[1],motorPool[2]+1.6],'TALLER  /  SALIDA')
+  for (const [i,at] of Duo.parking.entries()) worldLabel([at[0],at[1],at[2]+.3],'0'+(i+1))
+  gallery.forEach((car,i) => {
+    const [x,y,z] = Duo.exhibit[i]
+    worldLabel([x,y,z+1.35],'0'+(i+1)+'  /  '+(Duo.cars[car.model]?.name || ''))
+  })
+}
 const hqProps = new Map()
 function unloadHQ() {
   for (const entity of hqProps.values()) if (entity) DeleteObject(entity)
@@ -136,7 +263,10 @@ function streamHQ() {
   }
 }
 on('onClientResourceStop', resource => {
-  if (resource === GetCurrentResourceName()) unloadHQ()
+  if (resource !== GetCurrentResourceName()) return
+  unloadHQ()
+  for (const key of scenery.keys()) clearProp(key)
+  if (sharedPin) RemoveBlip(sharedPin.pin)
 })
 
 function updatePaint() {
@@ -320,7 +450,7 @@ onNet('duo:state', next => {
   if (!state) return
   if (reconfigured && state.teamwork?.switching) notify('Relevo: intercambiad los asientos')
   const color = state.stop.gang ? 1 : 5
-  routeBlips = state.targets.map(site => blip(site.at, site.text, site.air ? 423 : site.search ? 162 : 1, color))
+  routeBlips = state.targets.filter(site => !site.localOnly).map(site => blip(site.at, site.text, site.air ? 423 : site.search ? 162 : 1, color))
   if (routeBlips.length && !state.targets[0].search) {
     SetBlipRoute(routeBlips[0], true)
     SetBlipRouteColour(routeBlips[0], color)
@@ -408,6 +538,15 @@ function updateNPCs() {
   const vehicle = resolve(state.vehicle)
   updateTow(vehicle)
   updateEscort()
+  const survivor = resolve(state.waving)
+  if (survivor && NetworkHasControlOfEntity(survivor) && !configured.has(state.waving)) {
+    const dictionary = 'friends@frj@ig_1'
+    if (HasAnimDictLoaded(dictionary)) {
+      TaskPlayAnim(survivor,dictionary,'wave_a',4,-4,7500,48,0,false,false,false)
+      configured.add(state.waving)
+      RemoveAnimDict(dictionary)
+    } else RequestAnimDict(dictionary)
+  }
   const passenger = resolve(state.passenger)
   if (vehicle && passenger && state.step === 0 && NetworkHasControlOfEntity(passenger) &&
       distance(GetEntityCoords(vehicle), state.stop.at) < 18 &&
@@ -418,6 +557,7 @@ function updateNPCs() {
   }
   const targets = GetActivePlayers().filter(player => state.members.includes(GetPlayerServerId(player)))
     .map(GetPlayerPed).filter(ped => ped && !IsEntityDead(ped))
+  if (state.outbreak) targets.push(...state.outbreak.map(resolve).filter(p => p && !IsEntityDead(p)))
   for (const id of state.enemies) {
     const enemy = resolve(id)
     if (!enemy || IsEntityDead(enemy)) continue
@@ -429,7 +569,8 @@ function updateNPCs() {
       SetBlockingOfNonTemporaryEvents(enemy, true)
       SetPedDropsWeaponsWhenDead(enemy, false)
       SetPedAccuracy(enemy, 22)
-      GiveWeaponToPed(enemy, GetHashKey('WEAPON_PISTOL'), 120, false, true)
+      if (state.outbreak) RemoveAllPedWeapons(enemy,true)
+      else GiveWeaponToPed(enemy, GetHashKey('WEAPON_PISTOL'), 120, false, true)
       configured.add(id)
     }
     const coords = GetEntityCoords(enemy)
@@ -467,6 +608,7 @@ setInterval(() => {
     updateNPCs()
     updatePaint()
     streamHQ()
+    streamScenery()
   }
 }, 1100)
 
@@ -480,6 +622,14 @@ setTick(() => {
   if (!playable || panelOpen) return
   const ped = PlayerPedId()
   const coords = GetEntityCoords(ped)
+  drawHeadquarters(coords)
+  if (sharedPin) {
+    if (now >= sharedPin.until) { RemoveBlip(sharedPin.pin); sharedPin = undefined }
+    else {
+      const [x,y,z] = sharedPin.at
+      worldLabel([x,y,z+1.5],'Compañero · '+Math.round(distance(coords,sharedPin.at))+' m')
+    }
+  }
   const driving = GetVehiclePedIsIn(ped, false)
   if (available) {
     try {
@@ -523,6 +673,11 @@ setTick(() => {
       SetTextCentre(false)
       SetTextWrap(0.0, 1.0)
     }
+    if (state.cargo && state.cargo.lifted === null) {
+      Duo.eclipse.cargo.forEach(([x,y,z],i) => {
+        if (distance(coords,[x,y,z])<120) worldLabel([x,y,z+3.1],state.cargo.labels[i])
+      })
+    }
     const reach = state.rally && state.step < state.total ? 14 : 6
     let canConfirm = false
     for (const site of state.targets) {
@@ -531,13 +686,31 @@ setTick(() => {
         DrawMarker(28, ...site.at, 0, 0, 0, 0, 0, 0, 180, 180, 180, 85, 196, 255, 44,
           false, false, 2, false, null, null, false)
       } else if (dist < 65) marker(site.at, state.stop.gang ? [215, 55, 55] : [255, 190, 62])
-      if (dist < (site.air ? 90 : reach)) canConfirm = true
+      if (dist < (site.air ? 90 : site.localOnly ? 12 : reach)) canConfirm = true
     }
     if (canConfirm) prompt = {
       control: 38, text: 'Confirmar objetivo',
       run: () => request('step', { id: state.id, step: state.step })
     }
+    if (canConfirm && state.terminal) prompt = { control:38, text:'Abrir consola del atraco', run:() => openPanel('hq') }
     const vehicle = resolve(state.vehicle)
+    if (canConfirm && state.cockpit && vehicle && driving === vehicle && GetPedInVehicleSeat(vehicle,-1) === ped) {
+      prompt = { control:38, text:state.cockpit.key === 'hook' ? 'Acoplar cable' : 'Activar puesto aéreo',
+        run:() => request('heistInput',state.cockpit) }
+    }
+    if (canConfirm && state.airReturn) {
+      if (!vehicle || driving !== vehicle) prompt.text = 'Sube a la aeronave asignada'
+      else if (GetEntitySpeed(driving)>2) prompt.text = 'Detén la aeronave asignada'
+    }
+    if (canConfirm && state.escort && state.step>0) {
+      const escort = resolve(state.escort.vehicle)
+      if (!escort || distance(GetEntityCoords(escort),state.stop.at)>20) prompt.text = 'Espera a la furgoneta de escolta'
+    }
+    if (canConfirm && state.finalDuo && !state.cargo) {
+      const together = GetActivePlayers().filter(p => state.members.includes(GetPlayerServerId(p)) &&
+        distance(GetEntityCoords(GetPlayerPed(p)),state.stop.at) <= 12)
+      if (together.length < 2) prompt.text = 'Falta tu compañero en el cuartel'
+    }
     if (vehicle && distance(coords, GetEntityCoords(vehicle)) < 35) {
       const [x, y, z] = GetEntityCoords(vehicle)
       DrawMarker(2, x, y, z + 1.7, 0, 0, 0, 0, 0, 0, 0.45, 0.45, 0.45, 85, 196, 255, 190,
@@ -548,6 +721,21 @@ setTick(() => {
     marker(cache.at, [180, 240, 113])
     if (!prompt && distance(coords, cache.at) < 6) {
       prompt = { control: 47, text: 'Recoger alijo diario', run: () => request('claim') }
+    }
+  }
+  if (!state) {
+    const incident = nearbyIncidents.find(offer => !offer.completed && Date.now() < offer.expires &&
+      distance(coords, offer.at) < 55)
+    if (incident) {
+      marker(incident.at, [117, 196, 220])
+      if (lastNearbyIncident !== incident.id) {
+        lastNearbyIncident = incident.id
+        const minutes = Math.ceil((incident.expires - Date.now()) / 60000)
+        notify(incident.kind + ' · ' + incident.zone + ' · $' + incident.pay + ' · ' + minutes + ' min')
+      }
+      if (!prompt && distance(coords, incident.at) < 28) {
+        prompt = { control: 38, text: incident.kind + ' · Ver incidente', run: () => openPanel('world') }
+      }
     }
   }
   for (const station of Duo.hq) {
@@ -562,6 +750,8 @@ setTick(() => {
     const meters = distance(coords, point.at)
     return meters < (closest?.meters ?? 3.2) ? { point, meters } : closest
   }, null)?.point
+  if (!prompt && !state && driving && motorPool && distance(coords,motorPool) < 12)
+    prompt = { control:38, text:'Bajad del coche para guardarlo · Ver garaje', run:() => openPanel('garage') }
   if (!prompt && station && !state && !driving) {
     prompt = { control: 38, text: station.name, run: () => openPanel(station.tab) }
   }

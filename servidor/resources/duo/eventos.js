@@ -90,3 +90,10 @@ Duo.worldEvents = [
     ]
   }
 ]
+
+// Separate dispatch plazas keep the assigned vehicle clear of the tow and escort actors.
+Duo.incidentDistricts = [
+  { name: 'Ciudad', sites: [[0, [1164, -332, 69.2, 100]], [1, [-1067, -1221, 3.1, 120]], [6, [-575, -873, 25.9, 180]]] },
+  { name: 'Puerto y sur', sites: [[2, [880, -3211, 5.9, 90]], [4, [1159, -3300, 5.9, 90]], [5, [101, -1948, 20.8, 315]]] },
+  { name: 'Blaine County', sites: [[3, [1728, 3309, 41.2, 15]], [7, [1545, 3812, 31, 110]], [8, [1723, 3710, 34.2, 25]]] }
+]

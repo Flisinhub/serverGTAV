@@ -5,7 +5,7 @@ const path = require('node:path')
 const test = require('node:test')
 const vm = require('node:vm')
 
-const scripts = ['contratos.js', 'expansion.js', 'flota.js', 'campana.js', 'frecuencia.js', 'operaciones.js', 'eventos.js', 'guardado.js', 'servidor.js']
+const scripts = ['contratos.js', 'expansion.js', 'flota.js', 'campana.js', 'frecuencia.js', 'operaciones.js', 'turnos.js', 'atracos.js', 'eventos.js', 'guardado.js', 'atracos_servidor.js', 'servidor.js']
 const resource = path.join(__dirname, '..', 'servidor', 'resources', 'duo')
 const licenses = { 1: 'license:aaaa', 2: 'license:bbbb' }
 const copy = value => value === undefined ? undefined : JSON.parse(JSON.stringify(value))
@@ -345,6 +345,282 @@ function complete(world, key, partner = 2, { contract = world.data.contracts[key
   return finishing
 }
 
+test('Despacho permite redirigir, cerrar antes y liquidar solo los bultos cargados', t => {
+  const w = createWorld(temporaryRoot(t))
+  w.connect(1); w.connect(2)
+  start(w,'ultima_recogida')
+  w.step(1); w.step(2)
+  assert.equal(w.panel(1).dispatch.editable,false)
+  w.action(1,'dispatch',0)
+  assert.equal(w.state(1).targets.length,0)
+  w.action(2,'dispatch',1); w.action(2,'dispatch',0)
+  const site = w.data.pickups[0]
+  assert.deepEqual(w.state(1).targets[0].at,copy(site.at))
+  arrive(w,site.at); arrive(w,site.at,2,false)
+  w.seat(w.ped(1),w.state(1).vehicle,-1)
+  w.step(2); w.step(2)
+  assert.equal(w.panel(2).dispatch.boxes,site.boxes)
+  w.elapse(481000)
+  w.action(2,'dispatch',1)
+  assert.equal(w.state(1).targets.length,0)
+  w.action(2,'dispatch','return')
+  arrive(w,w.data.garage); arrive(w,w.data.garage,2,false)
+  w.step()
+  assert.equal(w.saved(2).lastSettlement.amount,site.boxes*320)
+})
+
+test('Guardacostas exige piloto, patrón, lancha parada y náufrago a bordo', t => {
+  const w = createWorld(temporaryRoot(t))
+  w.connect(1); w.connect(2)
+  start(w,'guardacostas')
+  w.step(1); w.step(2)
+  const {vehicle,boat} = w.state(1)
+  w.seat(w.ped(1),vehicle,-1)
+  w.elapse(1100)
+  const at = w.state(1).targets[0].at
+  arrive(w,at)
+  w.step(1)
+  assert.equal(w.state(2).targets[0].localOnly,true)
+  w.position(boat,at); w.position(w.ped(2),at)
+  w.step(2)
+  assert.equal(w.state(1).step,2)
+  w.seat(w.ped(2),boat,-1)
+  w.step(2)
+  assert.equal(w.state(1).step,3)
+  w.position(boat,w.data.sea.dock)
+  w.entities.get(boat).speed = 4
+  w.step(2)
+  assert.ok(w.state(1))
+  w.entities.get(boat).speed = 0
+  w.step(2)
+  assert.equal(w.saved(1).lastSettlement.amount,2650)
+  assert.equal(w.entities.size,2)
+})
+
+test('Davis recuerda a cada vecino y cambia el encargo de la segunda visita', t => {
+  const w = createWorld(temporaryRoot(t))
+  w.connect(1); w.connect(2)
+  for (const i of [0,1,2,0,1,2]) {
+    const repeat = w.panel(1).completed >= 3
+    start(w,'noche_davis')
+    w.action(2,'chooseRoute',i)
+    arrive(w,w.data.davis[i].at); w.step()
+    const dest = w.state(1).targets[0]
+    assert.equal(dest.text.includes(w.data.davis[i].follow),repeat)
+    arrive(w,dest.at); w.step()
+    arrive(w,w.data.garage); w.step()
+    assert.equal(w.state(1),null)
+    assert.ok(w.saved(2).davis.includes(i))
+  }
+})
+
+test('El equipo original retoma Doble baliza desde disco y cobra una sola vez', t => {
+  const root = temporaryRoot(t)
+  let w = createWorld(root)
+  w.connect(1); w.connect(2)
+  start(w,'doble_baliza')
+  w.step(1); w.step(2)
+  arrive(w,w.data.contracts.doble_baliza.stops[1].at); w.step()
+  const receipt = w.saved(1).checkpoint.receipt
+  w.fire(1,'onResourceStop','duo')
+  w = createWorld(root)
+  w.connect(1); w.connect(2)
+  assert.equal(w.panel(1).resumeName,'Doble baliza')
+  w.action(1,'resumeShift'); w.action(2,'join')
+  assert.equal(w.state(1).step,2)
+  complete(w,'doble_baliza')
+  assert.ok(w.saved(2).receipts.includes(receipt))
+  assert.equal(w.panel(1).resumeName,null)
+  w.action(1,'resumeShift')
+  assert.equal(w.state(1),null)
+})
+
+test('Preparación y bolsillo respetan saldo, propiedad, presupuesto y guardado', t => {
+  const w = createWorld(temporaryRoot(t))
+  w.connect(1); w.connect(2)
+  w.action(1,'pocket','barrita')
+  w.action(1,'favoriteCar','sultan')
+  assert.equal(w.panel(1).setup.model,'blista')
+  w.action(1,'favoriteCar','blista')
+  w.position(w.ped(1),w.data.motorPool)
+  w.action(1,'prepareShift',55)
+  assert.equal(w.panel(1).activeCar,null)
+  w.failWrite('perfil-aaaa.json')
+  w.action(1,'prepareShift',75)
+  assert.equal(w.panel(1).activeCar,null)
+  w.action(1,'prepareShift',75)
+  assert.equal(w.saved(1).cash,425)
+  assert.equal(w.saved(1).food.barrita,3)
+  w.action(1,'prepareShift',75)
+  assert.equal(w.saved(1).cash,425)
+  w.action(1,'quickEat')
+  assert.equal(w.saved(1).food.barrita,2)
+  w.fire(1,'duo:ping',[12,42,15])
+  assert.deepEqual(w.latest('duo:ping',2),[12,42,15])
+  w.fire(1,'duo:ping',[0,0,0])
+  assert.deepEqual(w.latest('duo:ping',2),[12,42,15])
+})
+
+function beginHeist(w,key) {
+  w.connect(1)
+  w.connect(2)
+  start(w,key)
+  w.step(1)
+  w.step(2)
+  assert.equal(w.state(1).step,1)
+  const job = w.data.contracts[key]
+  if (key === 'proyecto_eclipse') {
+    const helicopter = w.state(1).vehicle
+    const crane = w.find('handler','vehicle')
+    for (const [player,vehicle] of [[1,helicopter],[2,crane]]) {
+      const [x,y,z] = w.data.eclipse.cargo[1]
+      const at = [x,y,z+(player===1?20:0)]
+      w.position(w.ped(player),at)
+      w.position(vehicle,at)
+      w.seat(w.ped(player),vehicle,-1)
+    }
+  } else {
+    inputHeist(w,1,'ready')
+    assert.match(w.panel(1).heist.readout[0],/pendiente/)
+    for (const player of [1,2]) w.position(w.ped(player),job.sites[player-1])
+  }
+  const initial = w.panel(2).heist
+  inputHeist(w,1,'ready')
+  w.action(2,'heistInput',{id:initial.id,rev:initial.rev,key:'ready'},false)
+  assert.equal(w.panel(1).heist.phase,'play')
+}
+
+function inputHeist(w,player,key) {
+  const {id,rev} = w.panel(player).heist
+  w.action(player,'heistInput',{id,rev,key})
+}
+
+function solveCaja(w) {
+  const view = w.panel(2).heist
+  assert.deepEqual(view.choices,[])
+  assert.deepEqual(w.panel(1).heist.readout,[])
+  for (const symbol of view.readout) inputHeist(w,1,symbol)
+}
+
+function deliverHeist(w) {
+  arrive(w,w.data.garage)
+  const state = w.state(1)
+  w.step(1)
+  assert.ok(w.state(1),'El otro jugador aún no ha vuelto')
+  arrive(w,w.data.garage,2,false)
+  w.step(2)
+  assert.equal(w.state(1),null)
+  w.step(1,state)
+}
+
+test('Caja de cierre separa las pistas, exige los dos votos y liquida una sola vez',t => {
+  const w = createWorld(temporaryRoot(t))
+  beginHeist(w,'caja_cierre')
+  const stale = w.panel(1).heist
+  const sequence = w.panel(2).heist.readout
+  const wrong = stale.choices.find(([symbol])=>symbol!==sequence[0])[0]
+  inputHeist(w,1,wrong)
+  assert.equal(w.panel(1).heist.cursor,0)
+  assert.ok(w.state(1).remaining < 115)
+  w.action(1,'heistInput',{id:stale.id,rev:stale.rev,key:sequence[0]})
+  assert.equal(w.panel(1).heist.rev,stale.rev+1)
+  solveCaja(w)
+  inputHeist(w,1,'extra')
+  assert.equal(w.panel(1).heist.phase,'choice')
+  inputHeist(w,2,'extra')
+  solveCaja(w)
+  deliverHeist(w)
+  for (const player of [1,2]) {
+    const data = w.saved(player)
+    assert.deepEqual(data.lastSettlement.breakdown,{base:1350,extra:650})
+    assert.equal(data.cash,2500)
+    assert.deepEqual(data.heists,['caja_cierre'])
+  }
+})
+
+test('La alerta antes del botín falla, y tras asegurar la base solo vence el extra',t => {
+  for (const secured of [false,true]) {
+    const w = createWorld(temporaryRoot(t))
+    beginHeist(w,'caja_cierre')
+    if (secured) {
+      solveCaja(w)
+      inputHeist(w,1,'extra')
+      inputHeist(w,2,'extra')
+    }
+    w.elapse(121000)
+    if (!secured) {
+      assert.equal(w.state(1),null)
+      assert.equal(w.panel(1).cash,500)
+    } else {
+      assert.equal(w.state(1).step,2)
+      deliverHeist(w)
+      assert.deepEqual(w.saved(2).lastSettlement.breakdown,{base:1350,extra:0})
+    }
+  }
+})
+
+test('Cámara de ecos alterna puestos, recupera la sesión y permite entregar la base',t => {
+  const w = createWorld(temporaryRoot(t))
+  beginHeist(w,'camara_ecos')
+  for (let cursor=0;cursor<3;cursor++) {
+    const operator = 1+cursor%2
+    const reader = 3-operator
+    const signal = w.panel(reader).heist.readout[0].replace('Eco · ','')
+    assert.equal(w.panel(operator).heist.choices.length,6)
+    inputHeist(w,reader,signal)
+    assert.equal(w.panel(reader).heist.cursor,cursor)
+    if (cursor === 1) {
+      w.drop(2)
+      w.elapse(130000)
+      assert.ok(w.state(1))
+      w.connect(2)
+      w.position(w.ped(2),w.data.contracts.camara_ecos.sites[1])
+      assert.equal(w.panel(2).heist.cursor,1)
+    }
+    inputHeist(w,operator,signal)
+  }
+  inputHeist(w,2,'leave')
+  deliverHeist(w)
+  assert.deepEqual(w.saved(1).lastSettlement.breakdown,{base:2700,extra:0})
+})
+
+test('Eclipse cruza emblemas e IDs, comprueba los vehículos y entrega la carga con ambos a bordo',t => {
+  const w = createWorld(temporaryRoot(t))
+  beginHeist(w,'proyecto_eclipse')
+  const emblem = w.panel(2).heist.readout[0].replace('Prototipo · ','')
+  const cargo = w.state(1).cargo.labels.indexOf(emblem)
+  assert.ok(cargo>=0)
+  const heli = w.state(1).vehicle
+  const crane = w.find('handler','vehicle')
+  const ids = w.state(2).cargo.labels
+  for (const index of [(cargo+1)%3,cargo]) {
+    const at = w.data.eclipse.cargo[index]
+    w.position(crane,at)
+    inputHeist(w,2,ids[index])
+    assert.equal(w.state(1).step,1)
+    assert.equal(w.state(1).cargo.onCrane,index===cargo)
+  }
+  const [x,y,z] = w.data.eclipse.cargo[cargo]
+  w.position(heli,[x+20,y,z+10])
+  inputHeist(w,1,'hook')
+  assert.equal(w.panel(1).heist.phase,'hook')
+  w.position(heli,[x,y,z+10])
+  w.action(1,'heistInput',w.state(1).cockpit)
+  assert.equal(w.state(1).step,2)
+  assert.equal(w.state(1).cargo.lifted,cargo)
+  const at = w.data.eclipse.landing
+  w.position(heli,at)
+  w.position(w.ped(1),at)
+  w.step(1)
+  assert.ok(w.state(1))
+  w.position(w.ped(2),at)
+  w.seat(w.ped(2),heli,0)
+  w.step(1)
+  assert.equal(w.state(1),null)
+  assert.equal(w.saved(2).lastSettlement.amount,4200)
+  assert.equal(w.entities.size,2)
+})
+
 test('Dos jugadores completan las 39 misiones y conservan el progreso previo', t => {
   const world = createWorld(temporaryRoot(t))
   world.seed(1, { cash: 8000, completed: 7, bestRally: 90000, cars: { blista: 'cobre', sultan: 'petroleo' } })
@@ -352,7 +628,8 @@ test('Dos jugadores completan las 39 misiones y conservan el progreso previo', t
   world.connect(2)
   assert.equal(world.panel(1).cash, 8000)
   assert.equal(world.panel(2).cars.blista, 'grafito')
-  const contractIds = Object.keys(world.data.contracts)
+  const contractIds = Object.keys(world.data.contracts).filter(key => !world.data.contracts[key].shift && !world.data.contracts[key].heist)
+  assert.equal(Object.keys(world.data.contracts).length,46)
   assert.equal(contractIds.length, 39)
   const featured = world.panel(1).featured
   let total = 0
@@ -370,8 +647,8 @@ test('Dos jugadores completan las 39 misiones y conservan el progreso previo', t
   assert.equal(world.saved(2).cash, 500 + total)
   assert.equal(world.saved(1).completed, 7 + contractIds.length)
   assert.equal(world.saved(2).completed, contractIds.length)
-  assert.deepEqual(world.saved(1).operations, copy(world.data.operations))
-  assert.deepEqual(world.saved(2).operations, copy(world.data.operations))
+  assert.deepEqual(world.saved(1).operations, copy(world.data.operations.filter(key => !world.data.contracts[key].shift)))
+  assert.deepEqual(world.saved(2).operations, copy(world.data.operations.filter(key => !world.data.contracts[key].shift)))
   const settlement = world.panel(2).settlement
   const lastContract = world.data.contracts[contractIds.at(-1)]
   assert.deepEqual(settlement, { name: lastContract.name, amount: lastContract.pay, completed: 39,
@@ -484,6 +761,105 @@ test('El punto de reintento invalida la etapa anterior y el encargo paga una sol
     assert.equal(world.saved(player).cash, 500 + contract.pay)
     assert.equal(world.saved(player).campaign.filter(mission => mission === key).length, 1)
   }
+})
+
+test('Los nueve incidentes se aceptan y pagan en ruta en solitario y en dúo', t => {
+  const root = temporaryRoot(t)
+  for (const duo of [false, true]) {
+    const completed = new Set()
+    for (let rotation = 0; rotation < 3; rotation++) {
+      const period = 1200000
+      const world = createWorld(root, { clock: Date.UTC(2026, duo ? 3 : 2, 1) + period * rotation })
+      world.connect(1)
+      if (duo) world.connect(2)
+      const offers = world.panel(1).incidents
+      assert.equal(offers.length, 3)
+      assert.equal(new Set(offers.map(offer => offer.district)).size, 3)
+      for (const offer of offers) {
+        const contract = world.data.worldEvents.find(event => offer.id.endsWith(':' + event.key))
+        const before = world.panel(1).cash
+        world.position(world.ped(1), world.data.base)
+        world.action(1, 'markIncident', offer.id)
+        assert.deepEqual(world.latest('duo:locateCar'), offer.at)
+        world.action(1, 'startIncident', offer.id)
+        assert.equal(world.state(1), null)
+        world.position(world.ped(1), offer.at)
+        if (duo) world.position(world.ped(2), offer.at)
+        world.action(1, 'startIncident', offer.id)
+        const first = world.state(1)
+        assert.equal(first.name, contract.name)
+        if (duo) {
+          world.action(2, 'startIncident', offer.id, false)
+          assert.equal(world.state(2), null)
+          world.action(2, 'join')
+          assert.equal(world.state(2).id, first.id)
+        }
+        if (duo && contract.kind === 'Búsqueda') {
+          assert.match(world.panel(1).objectives[1], /oeste a este/)
+          assert.match(world.panel(2).objectives[1], /sur a norte/)
+        }
+        let secondary
+        const confirmer = duo && contract.kind !== 'Búsqueda' ? 2 : 1
+        for (const [index, stop] of contract.stops.entries()) {
+          arrive(world, stop.at)
+          if (duo) {
+            world.seat(world.ped(1), first.vehicle)
+            world.position(world.ped(2), stop.at)
+          }
+          if (stop.tow) {
+            world.elapse(1100)
+            secondary = world.find(stop.tow, 'vehicle')
+            assert.ok(secondary)
+          } else if (secondary) world.position(secondary, stop.at)
+          if (confirmer === 2) {
+            world.step(1)
+            assert.equal(world.state(1).step, index)
+          }
+          world.step(confirmer)
+          if (stop.escort) {
+            secondary = world.find(stop.escort, 'vehicle')
+            assert.ok(secondary)
+          }
+        }
+        assert.equal(world.state(1), null, 'Cobra en el destino sin volver al cuartel')
+        assert.equal(world.panel(1).cash, before + contract.pay)
+        assert.equal(world.panel(1).incidents.find(item => item.id === offer.id).completed, true)
+        if (duo) assert.ok(world.saved(2).incidents.includes(offer.id))
+        world.action(1, 'step', { id: first.id, step: 1 })
+        world.position(world.ped(1), offer.at)
+        world.action(1, 'startIncident', offer.id)
+        assert.equal(world.state(1), null)
+        assert.equal(world.panel(1).cash, before + contract.pay)
+        completed.add(contract.key)
+      }
+    }
+    assert.equal(completed.size, 9)
+  }
+})
+
+test('Un incidente reservado sobrevive a la rotación y el compañero puede reincorporarse', t => {
+  const period = 1200000
+  const clock = period * 1420000 + period - 20000
+  const world = createWorld(temporaryRoot(t), { clock })
+  world.connect(1)
+  world.connect(2)
+  const offer = world.panel(1).incidents[0]
+  const stale = world.panel(1).incidents[1]
+  for (const player of [1, 2]) world.position(world.ped(player), offer.at)
+  world.action(1, 'startIncident', offer.id)
+  const first = world.state(1)
+  world.action(2, 'join')
+  world.drop(2)
+  world.elapse(21000)
+  assert.equal(world.state(1).id, first.id)
+  assert.equal(world.latest('duo:incidents', 1).some(incident => incident.id === offer.id), false)
+  world.connect(2)
+  assert.equal(world.state(2).id, first.id)
+  world.action(1, 'cancel')
+  world.position(world.ped(1), stale.at)
+  world.action(1, 'startIncident', stale.id)
+  assert.equal(world.state(1), null)
+  assert.match(world.latest('duo:notice'), /caducado/)
 })
 
 test('La oferta diaria recorre las nueve variantes y admite juego en dúo y en solitario', t => {
@@ -1070,4 +1446,72 @@ test('El perfil remoto acepta solo las dos licencias configuradas', t => {
   } })
   invalid.connect(1, allowlist[0])
   assert.match(attempt(invalid, 1).message, /configurar los dos jugadores/)
+})
+test('Última ambulancia valida roles, rescate parcial o doble, cobro único y limpieza',t => {
+  for (const count of [1,2]) {
+    const w=createWorld(temporaryRoot(t))
+    w.connect(1)
+    w.connect(2)
+    start(w,'ultima_ambulancia')
+    w.step(1)
+    w.step(2)
+    const car=w.state(1).vehicle
+    w.seat(w.ped(1),car,-1)
+    assert.notDeepEqual(w.state(1).targets[0].at,w.state(2).targets[0].at)
+    for (let i=0;i<count;i++) {
+      const at=w.data.rescue.people[i]
+      arrive(w,at)
+      arrive(w,at,2,false)
+      w.elapse(1200)
+      w.step(1)
+      assert.equal(w.state(2).outbreak.length,1)
+      w.step(2)
+      assert.equal(w.state(2).outbreak.length,0)
+      assert.equal(w.state(1).enemies.length,3*(i+1))
+    }
+    const last=w.state(1)
+    arrive(w,w.data.rescue.hospital)
+    w.step(1)
+    assert.ok(w.state(1))
+    arrive(w,w.data.rescue.hospital,2,false)
+    w.step(2)
+    w.step(1,last)
+    assert.equal(w.entities.size,2)
+    for (const id of [1,2]) assert.equal(w.saved(id).cash,500+(count===2?2600:1800))
+  }
+})
+
+test('Un brote perdido se cierra sin pago y retira los infectados',t => {
+  const w=createWorld(temporaryRoot(t))
+  w.connect(1)
+  w.connect(2)
+  start(w,'ultima_ambulancia')
+  w.step(1)
+  w.step(2)
+  for (const at of w.data.rescue.people) {
+    arrive(w,at,2,false)
+    w.elapse(1200)
+    const state=w.state(2)
+    assert.ok(state.enemies.length<=8)
+    w.entities.get(state.outbreak[0]).health=0
+    w.elapse(1200)
+  }
+  assert.equal(w.state(1),null)
+  assert.equal(w.panel(1).cash,500)
+  assert.equal(w.entities.size,2)
+})
+test('El invitado elige conducir y el anfitrión recibe la ubicación del primer civil',t=>{
+  const w=createWorld(temporaryRoot(t))
+  w.connect(1)
+  w.connect(2)
+  start(w,'ultima_ambulancia')
+  const id=w.state(2).id
+  w.action(2,'rescueRole',{id,role:'driver'})
+  assert.equal(w.panel(2).operation.role,'Conductor de emergencias')
+  w.step(1)
+  w.action(1,'rescueRole',{id,role:'driver'})
+  assert.equal(w.panel(2).operation.role,'Conductor de emergencias')
+  w.step(2)
+  assert.deepEqual(w.state(1).targets[0].at,copy(w.data.rescue.people[0]))
+  assert.deepEqual(w.state(2).targets[0].at,copy(w.data.rescue.meeting))
 })

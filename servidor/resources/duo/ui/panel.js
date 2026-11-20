@@ -244,6 +244,20 @@ function campaign() {
   }
 }
 
+function boardInfo(contract) {
+  const dist = snapshot.startDistance || 0
+  const meters = dist >= 1000 ? (dist/1000).toFixed(1)+' km' : dist+' m'
+  let route = 0
+  let previous = Duo.base
+  for (const stop of contract.stops) {
+    route += Math.hypot(previous[0]-stop.at[0],previous[1]-stop.at[1])
+    previous = stop.at
+  }
+  route += Math.hypot(previous[0]-Duo.base[0],previous[1]-Duo.base[1])
+  const minutes = contract === Duo.contracts.guardacostas ? 15 : contract === Duo.contracts.ultima_recogida ? 10 :
+    Math.max(4,Math.ceil(route/750 + contract.stops.length))
+  return '≈ '+minutes+'–'+(minutes+5)+' min · '+meters+' al tablón · '+(contract.duoOnly?'2 jugadores':'1–2 jugadores')
+}
 function contracts() {
   const filters = element('div', '', 'filters')
   for (const kind of ['Todos', 'Trabajo', 'Banda', 'Contrarreloj', 'Aviación']) {
@@ -262,7 +276,7 @@ function contracts() {
     if (filter !== 'Todos' && filter !== kind) continue
     const featured = key === snapshot.featured
     const pay = contract.pay + (featured ? Math.floor(contract.pay / 4) : 0)
-    card(featured ? kind + ' · +25 % hoy' : kind, contract.name, detail, money(pay),
+    card(featured ? kind + ' · +25 % hoy' : kind, contract.name, detail+' · '+boardInfo(contract), money(pay),
       action('Iniciar', 'start', key, snapshot.atBase && !snapshot.ongoing), featured)
   }
 }
@@ -331,14 +345,23 @@ function garage(air = false) {
       swatches.append(option)
     }
     if (isSelected) {
+      const extras = element('div','','fleet-preferences')
+      extras.append(swatches)
+      if (owned && !air) extras.append(action('Guardar coche y pintura favoritos','favoriteCar',key,true,false))
       displayItem(section, key, car.name,
-        [car.kind, owned ? 'En propiedad' : money(car.price), reason].filter(Boolean).join(' · '), control, owned ? swatches : null)
+        [car.kind, owned ? 'En propiedad' : money(car.price), reason].filter(Boolean).join(' · '), control, owned ? extras : null)
     }
   }
   if (!cards) content.append(element('p', selected === 'Fuera' ? 'No tienes vehículos fuera.' :
     'No hay vehículos con este filtro.', 'empty'))
 }
 
+function foodControls(key, units) {
+  const row = element('div','','objective-actions')
+  row.append(action('Consumir','eat',key,units > 0,false),action(snapshot.setup?.food === key ? 'En el bolsillo' :
+    'Asignar al bolsillo','pocket',key,snapshot.setup?.food !== key,false))
+  return row
+}
 function shop() {
   displayBanner('shop', 'Despensa y armero', 'Comida para el camino, equipo y suministros.')
   const selected = fleetFilters.get('shop') || 'Todos'
@@ -363,7 +386,7 @@ function shop() {
       displayItem('shop', key, label, [description, supply.heal ? units + ' en mochila' : '', !owned ? reason : ''].filter(Boolean).join(' · '), owned
         ? element('span', 'En tu equipo', 'vehicle-status')
         : action('Comprar · ' + money(price), 'buy', key, !reason),
-      units ? action('Consumir', 'eat', key, true, false) : null)
+      supply.heal ? foodControls(key,units) : null)
     }
     cards++
     if (!owned && reason) article.insertBefore(element('p', reason, 'availability'), article.lastChild)
@@ -374,15 +397,55 @@ function shop() {
 function world() {
   const { cache, world: event } = snapshot
   if (snapshot.ongoing) contractControls()
+  const offers = snapshot.incidents || []
+  if (offers.length) {
+    const header = element('header', '', 'store-banner incident-banner')
+    header.append(element('h2', 'Incidentes en ruta'),
+      element('p', 'Acércate al encuentro para aceptar. El pago se entrega en el destino.'))
+    content.append(header)
+    const candidate = offers.find(offer => !offer.completed && offer.expires > Date.now())
+    for (const offer of offers) {
+      const label = candidate === offer ? 'Más cercano · ' : ''
+      const minutes = Math.max(0, Math.ceil((offer.expires - Date.now()) / 60000))
+      const valid = minutes > 0 && !offer.completed
+      const buttons = element('div', '', 'incident-actions')
+      buttons.append(action('Marcar GPS', 'markIncident', offer.id, valid, false),
+        action('Aceptar', 'startIncident', offer.id, valid && offer.canStart, true))
+      const duration = offer.kind === 'Escolta' ? '6–10' : '4–8'
+      const article = card(label + offer.district + ' · ' + offer.kind, offer.name, offer.brief+' · ≈ '+duration+' min · 1–2 jugadores',
+        offer.completed ? 'Cobrado' : money(offer.pay) + ' por jugador', buttons, candidate === offer)
+      const meters = offer.distance < 1000 ? offer.distance + ' m' : (offer.distance / 1000).toFixed(1) + ' km'
+      const timing = element('p', offer.completed ? 'Completado en esta rotación.' : '', 'incident-location')
+      if (!offer.completed) {
+        timing.dataset.expires = offer.expires
+        timing.dataset.location = offer.zone + ' · ' + meters
+      }
+      article.insertBefore(timing, article.lastChild)
+    }
+  }
   if (event) {
-    card([event.kind, event.zone].filter(Boolean).join(' · '), event.name, event.brief,
+    card(['Encargo diario', event.kind, event.zone].filter(Boolean).join(' · '), event.name, event.brief,
       money(event.pay), action('Aceptar encargo', 'startWorld', event.key, event.canStart), true)
   }
   if (cache) card('Exploración diaria', 'Alijo de ' + cache.label, cache.hint,
     cache.claimed ? 'Recogido' : money(Duo.cachePay),
     action('Marcar zona', 'locate', null, !cache.claimed), !event)
+  updateIncidentClocks()
 }
 
+function updateIncidentClocks() {
+  for (const clock of document.querySelectorAll('[data-shop-closes]')) {
+    const seconds = Math.max(0,Math.ceil((Number(clock.dataset.shopCloses)-Date.now())/1000))
+    clock.textContent = seconds ? 'Cierra en '+Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0') : 'Cerrado'
+    if (!seconds) clock.parentElement.querySelector('button').disabled = true
+  }
+  for (const timing of content.querySelectorAll('[data-expires]')) {
+    const seconds = Math.max(0, Math.ceil((Number(timing.dataset.expires) - Date.now()) / 1000))
+    const life = seconds ? Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0') : 'Oferta caducada'
+    timing.textContent = timing.dataset.location + ' · ' + life
+    if (!seconds) for (const control of timing.parentElement.querySelectorAll('.incident-actions button')) control.disabled = true
+  }
+}
 function selectSection(section) {
   const controls = Array.from(tabs.children)
   if (!controls.some(control => control.dataset.tab === section)) return
@@ -413,7 +476,7 @@ function updateClock() {
 function liveMission(mission) {
   const article = element('article', '', 'mission-summary')
   const heading = element('div', '', 'mission-heading')
-  const state = element('span', missionStatus[mission.stage], 'state-chip ' + mission.stage)
+  const state = element('span', mission.deliveryLabel || missionStatus[mission.stage], 'state-chip ' + mission.stage)
   const title = element('h2', mission.name)
   heading.append(title, state)
   if (timerEnds > Date.now()) {
@@ -436,13 +499,37 @@ function liveMission(mission) {
     crew.append(slot)
   }
   article.append(crew)
+  if (snapshot.heist) renderHeistConsole(article,snapshot.heist)
+  if (snapshot.dispatch) {
+    const sheet = snapshot.dispatch
+    const list = element('section','','dispatch-sheet')
+    list.append(element('h3','Hoja de ruta'),element('p',sheet.boxes+' bultos cargados · '+money(sheet.boxes*320)+' por persona'))
+    sheet.stops.forEach((stop,i) => {
+      const row = element('div','','objective-actions')
+      const control = action(stop.collected ? 'Recogido' : sheet.selected === i ? 'En ruta' : 'Marcar parada','dispatch',i,
+        sheet.editable && !stop.collected && stop.seconds>0 && sheet.selected !== i,false)
+      const closes = element('span',stop.collected ? 'Cargado' : '')
+      if (!stop.collected) closes.dataset.shopCloses = (snapshot.receivedAt || Date.now())+stop.seconds*1000
+      row.append(element('strong',stop.name), element('span',stop.boxes+' bultos'), closes,control)
+      list.append(row)
+    })
+    list.append(action('Cerrar ruta y volver','dispatch','return',sheet.editable))
+    article.append(list)
+  }
+
   const controls = element('div', '', 'objective-actions')
   const operation = snapshot.operation
   if (!snapshot.member) {
     controls.append(action('Unirse al contrato', 'join', null, snapshot.canJoin))
-    if (!snapshot.canJoin) article.append(element('p', snapshot.atBase
+    if (mission.incident) controls.append(action('Marcar encuentro', 'markIncident', mission.incident, true, false))
+    if (!snapshot.canJoin) article.append(element('p', mission.incident ? 'Acércate al punto de encuentro antes del primer objetivo.' : snapshot.atBase
       ? 'La incorporación se hace antes de salir.' : 'Ve al cuartel para unirte.', 'availability'))
   } else if (operation?.briefing) {
+    if (operation.chooseRescueRole) {
+      const driving = operation.role === Duo.contracts.ultima_ambulancia.roles[0]
+      controls.append(action(driving ? 'Elegir rescatista' : 'Elegir conductor','rescueRole',
+        {id:operation.id,role:driving ? 'rescuer' : 'driver'},snapshot.atBase,false))
+    }
     controls.append(action('Confirmar salida', 'confirmBriefing', { id: operation.id, step: operation.step }, operation.canBrief))
     if (!operation.canBrief) article.append(element('p', operation.count < 2 ? 'Esperando a que se una el compañero.'
       : operation.confirmed && mission.crew.some(member => member.self && member.status === 'ready')
@@ -459,6 +546,23 @@ function liveMission(mission) {
 }
 
 function headquarters() {
+  if (!snapshot.mission && snapshot.resumeName) {
+    const saved = element('article','','mission-summary')
+    saved.append(element('h2','Turno guardado'),element('p',snapshot.resumeName),
+      action('Reanudar en Pillbox','resumeShift',null,snapshot.atBase))
+    if (!snapshot.atBase) saved.append(element('p','Id al tablón con el equipo original.','availability'))
+    overview.append(saved)
+  }
+  if (!snapshot.mission && snapshot.setup) {
+    const kit = snapshot.setup
+    const card = element('article','','mission-summary')
+    const held = snapshot.food?.[kit.food] || 0
+    card.append(element('h2','Salida habitual'),element('p',Duo.cars[kit.model].name+' · '+Duo.paints[kit.paint].name),
+      element('p',Duo.supplies[kit.food].label+' · '+held+' en mochila · '+kit.missing+' por reponer'),
+      action('Preparar por '+money(kit.cost),'prepareShift',kit.cost,snapshot.atGarage && snapshot.cash >= kit.cost))
+    if (!snapshot.atGarage || snapshot.cash < kit.cost) card.append(element('p',!snapshot.atGarage?'Acércate al garaje.':'Saldo insuficiente.','availability'))
+    content.append(card)
+  }
   const bays = snapshot.garageBays || [false, false]
   const connected = (snapshot.crew ?? 0) + '/2 jugadores conectados'
   bar.append(element('span', connected))
@@ -487,11 +591,14 @@ function headquarters() {
       receipt.append(element('span', 'Último cierre', 'type'), element('h2', name),
         element('strong', '+' + money(amount), 'settlement-payment'),
         element('p', progress + ' · ' + completed + ' contratos al cobrar'))
+      const breakdown = snapshot.settlement.breakdown
+      if (breakdown) receipt.append(element('p','Botín base '+money(breakdown.base)+' · Extra '+money(breakdown.extra)))
       content.append(receipt)
     }
   }
   for (const [category, title, detail, destination] of [
     ['Encargos', 'Tablón de trabajos', 'Repartos, taxi, bandas y contrarreloj. El segundo jugador puede unirse aquí desde el menú.', 'contracts'],
+    ['Atracos', 'Tablón de atracos', 'Tienda, banco y Proyecto Eclipse. Preparación para dos en Pillbox.', 'heists'],
     ['Operaciones', 'Campañas', 'Consulta los capítulos y retomad los encargos de la historia.', 'campaign'],
     ['Vehículos', 'Garaje y taller', bays.filter(used => !used).length + '/' + bays.length + ' plazas de salida libres. Saca, guarda, pinta o recupera un coche.', 'garage'],
     ['Aviación', 'Hangar de Sandy Shores', 'Consulta tus aeronaves y marca el hangar en el mapa.', 'hangar'],
@@ -499,6 +606,49 @@ function headquarters() {
     ['Ciudad', 'Exploración', 'Consulta el encargo diario o localiza el alijo en el mapa.', 'world']
   ]) {
     card(category, title, detail, '', button('Abrir', () => selectSection(destination)))
+  }
+}
+
+function renderHeistConsole(article,terminal) {
+  const console = element('section','','heist-console')
+  const heading = element('header')
+  heading.append(element('h3',terminal.role),element('span',money(terminal.secured)+' asegurados','state-chip'))
+  console.append(heading,element('p',terminal.hint))
+  const readout = element('ol','','heist-readout')
+  for (const clue of terminal.readout) readout.append(element('li',clue))
+  if (readout.children.length) console.append(readout)
+  if (terminal.phase === 'play' && !terminal.eclipse)
+    console.append(element('p','Secuencia · '+terminal.cursor+' / '+terminal.length,'operation-roles'))
+  const dial = terminal.kind === 'caja_cierre' && terminal.phase === 'play' && terminal.choices.length > 0
+  const grid = terminal.slots?.length > 0
+  const buttons = element('div','','heist-inputs'+(dial?' symbol-dial':grid?' echo-matrix':''))
+  const choices = grid ? terminal.slots.map(sign => [sign,sign]) : terminal.choices
+  for (const [key,label] of choices) {
+    const enabled = !terminal.reason && terminal.choices.some(([choice]) => choice === key)
+    buttons.append(action(label,'heistInput',{ id:terminal.id,rev:terminal.rev,key },enabled,false))
+  }
+  if (dial) buttons.append(element('strong',terminal.cursor+' / '+terminal.length,'dial-center'))
+  console.append(buttons)
+  if (terminal.reason) console.append(element('p',terminal.reason,'availability'))
+  article.append(console)
+}
+
+function heistBoard() {
+  contractControls()
+  if (snapshot.mission) {
+    if (snapshot.heist) renderHeistConsole(content,snapshot.heist)
+    else content.append(button('Ver operación activa',() => selectSection('hq'),true,true))
+  }
+  for (const key of Duo.heists) {
+    const job = Duo.contracts[key]
+    const reason = snapshot.ongoing ? 'Hay un contrato en curso.' :
+      !snapshot.atBase ? 'Prepara la salida en el tablón de Pillbox.' : snapshot.crew < 2 ? 'Esperando al segundo jugador.' : ''
+    const item = card(job.category+' · '+job.minutes+' min',job.name,job.intro,
+      money(job.pay)+' por persona'+(job.extra ? ' · extra '+money(job.extra) : ''),
+      action('Preparar atraco','start',key,!reason))
+    item.insertBefore(element('p',job.roles.join(' / '),'operation-roles'),item.lastChild)
+    if (snapshot.completedHeists?.includes(key)) item.append(element('span','Completado','state-chip ready'))
+    if (reason) item.append(element('p',reason,'availability'))
   }
 }
 
@@ -516,7 +666,7 @@ function operations() {
     const contract = Duo.contracts[selectedOperation]
     const brief = element('article', '', 'mission-summary')
     brief.append(element('h2', contract.name), element('p', contract.intro), facts([
-      ['Zona', contract.area], ['Vehículo', contract.vehicleName], ['Pago individual', money(contract.pay)],
+      ['Zona', contract.area], ['Vehículo', contract.vehicleName], ['Pago individual', selectedOperation === 'ultima_recogida' ? '$320 por bulto' : money(contract.pay)],
       ['Primer jugador', contract.roles[0]], ['Segundo jugador', contract.roles[1]]
     ]))
     const reason = snapshot.ongoing ? 'Termina el encargo activo.' :
@@ -535,8 +685,8 @@ function operations() {
     const details = button('Ver ficha', () => { selectedOperation = key; render() })
     details.dataset.focus = 'operation:' + key
     const article = card(done ? 'Completada · Dúo' : 'Operación · Dúo', contract.name, Duo.briefs[key][1],
-      money(contract.pay) + ' por jugador', details, !!done)
-    const roles = element('p', contract.roles.join(' · '), 'operation-roles')
+      (key === 'ultima_recogida' ? '$320 por bulto' : money(contract.pay) + ' por jugador'), details, !!done)
+    const roles = element('p', boardInfo(contract)+' · '+contract.roles.join(' · '), 'operation-roles')
     article.insertBefore(roles, article.lastChild)
   }
 }
@@ -594,6 +744,7 @@ function render() {
   }
   if (tab === 'hq') headquarters()
   if (tab === 'operations') operations()
+  if (tab === 'heists') heistBoard()
   if (tab === 'campaign') campaign()
   if (tab === 'contracts') contracts()
   if (tab === 'garage') garage()
@@ -626,7 +777,11 @@ tabs.addEventListener('keydown', event => {
   target.focus()
 })
 resume.addEventListener('click', () => selectSection('hq'))
-setInterval(() => { if (!app.hidden) updateClock() }, 250)
+setInterval(() => {
+  if (app.hidden) return
+  updateClock()
+  if (tab === 'world' || snapshot?.dispatch) updateIncidentClocks()
+}, 250)
 
 document.getElementById('close').addEventListener('click', () => call('cierra'))
 document.addEventListener('keydown', event => {
@@ -650,6 +805,7 @@ window.addEventListener('message', event => {
   if (data?.type === 'snapshot') {
     const firstJoin = data.snapshot.member && !snapshot?.member
     snapshot = data.snapshot
+    snapshot.receivedAt = Date.now()
     timerEnds = Date.now() + (snapshot.mission?.remaining || 0) * 1000
     if (status.textContent === 'Consultando la central…') status.textContent = ''
     if (!app.hidden && firstJoin) selectSection('hq')
@@ -657,7 +813,7 @@ window.addEventListener('message', event => {
   }
   if (data?.type === 'crew' && snapshot) {
     snapshot.crew = data.count
-    if (tab === 'operations' || tab === 'hq') render()
+    if (['operations','heists','hq'].includes(tab)) render()
   }
   if (data?.type === 'notice') status.textContent = data.text
   if (data?.type === 'hud:visibility' && data.visible && !standalone && !welcomeOffered) {
@@ -676,7 +832,8 @@ if (standalone) {
   status.textContent = 'Vista previa local'
   const query = new URLSearchParams(location.search)
   const phases = {
-    idle: 'Cuartel sin operación', invite: 'Invitación', briefing: 'Preparación',
+    caja_cierre:'Atraco · Dial', camara_ecos:'Atraco · Matriz', proyecto_eclipse:'Atraco · Grúa',
+    dispatch: 'Hoja de ruta del dúo', idle: 'Cuartel sin operación', invite: 'Invitación', briefing: 'Preparación',
     field: 'Balizas en curso', reconnect: 'Reconexión', return: 'Regreso al cuartel', paid: 'Liquidación'
   }
   const controls = element('div', '', 'preview-controls')
@@ -713,8 +870,9 @@ if (standalone) {
     const first = player === 1
     const active = phase !== 'idle' && phase !== 'paid'
     const briefing = phase === 'briefing' || phase === 'invite'
-    const stage = briefing ? 'briefing' : phase
-    const contract = Duo.contracts.doble_baliza
+    const heist = Duo.heists.includes(phase)
+    const stage = briefing ? 'briefing' : (heist || phase === 'dispatch') ? 'field' : phase
+    const contract = heist ? Duo.contracts[phase] : phase === 'dispatch' ? Duo.contracts.ultima_recogida : Duo.contracts.doble_baliza
     const crew = contract.roles.map((role, index) => {
       const status = phase === 'invite' ? (index ? 'vacant' : 'pending') :
         phase === 'reconnect' && index === 1 ? 'away' : briefing ? (index ? 'pending' : 'ready') :
@@ -724,6 +882,9 @@ if (standalone) {
     })
     snapshot = {
       cash: phase === 'paid' ? 11150 : 9250, completed: exampleProgress.length + Number(phase === 'paid'),
+      receivedAt: Date.now(), dispatch: phase === 'dispatch' ? { selected:0, boxes:1, editable:!first,
+        stops:Duo.pickups.map((site,i) => ({ name:site.text, seconds:site.closes-50, boxes:site.boxes, collected:i===1 })) } : null,
+      setup: { model:'sultan', paint:'petroleo', food:'bocadillo', missing:1, cost:55 },
       cars: { blista: 'grafito', sultan: 'petroleo', mammatus: 'cobre' },
       weapons: ['pistolacombate'], food: { bocadillo: 2 }, crew: phase === 'reconnect' ? 1 : 2,
       operations: phase === 'paid' ? ['doble_baliza'] : [],
@@ -745,12 +906,35 @@ if (standalone) {
       settlement: phase === 'paid' ? { name: contract.name, amount: contract.pay, completed: exampleProgress.length + 1,
         progress: 'Operación registrada' } : null,
       cache: { label: 'Vespucci', hint: 'Junto al paseo que bordea los canales.', claimed: false },
+      incidents: [
+        ['Ciudad', 'Auxilio', 'Un cable en Mirror Park', 'Mirror Park', 720, 18],
+        ['Puerto y sur', 'Escolta', 'Relevo de estibadores', 'Terminal', 760, 3900],
+        ['Blaine County', 'Búsqueda', 'Caja sin etiqueta', 'Alamo Sea', 780, 6700]
+      ].map(([district, kind, name, zone, pay, distance], index) => ({
+        id: 'preview:' + index, district, kind, name, zone, pay, distance, expires: Date.now() + 1010000,
+        brief: ['Remolca el coche averiado hasta La Mesa.', 'Acompaña la furgoneta hasta la salida del puerto.',
+          'Sigue las pistas y encuentra los repuestos junto al lago.'][index], canStart: !active && index === 0
+      })),
       world: { key: 'auxilio_mirror', name: 'Auxilio en Mirror Park', kind: 'Auxilio', zone: 'Mirror Park',
         brief: 'Ayuda a un conductor con una avería y acompáñalo hasta el punto de recogida.', pay: 480, canStart: !active }
     }
+    if (heist) {
+      const shop = phase === 'caja_cierre'
+      const eclipse = phase === 'proyecto_eclipse'
+      const symbols = ['Luna','Órbita','Sol','Prisma','Cometa','Anillo']
+      const labels = eclipse ? (first ? [] : ['AX-17','BX-48','CX-63']) : first ? symbols : []
+      const clue = eclipse ? (first ? ['Lee los emblemas sobre los contenedores'] : ['Prototipo · Luna']) :
+        first ? [] : shop ? ['Prisma','Luna','Sol'] : ['Eco · Prisma']
+      snapshot.heist = { kind:phase, id:'preview',rev:0,role:contract.roles[player-1],secured:0,phase:'play',
+        eclipse, cursor:0,length:3,readout:clue,choices:labels.map(k=>[k,k]),
+        slots:phase==='camara_ecos'?symbols:[],hint:contract.intro }
+      snapshot.objectives = [contract.roles[player-1], 'Botín asegurado · $0']
+      snapshot.mission.step = 2
+      snapshot.mission.total = 3
+    }
     const mode = viewSelect.value
     const showHud = mode !== 'menu'
-    const remaining = phase === 'field' ? 18 : 0
+    const remaining = heist ? 96 : phase === 'field' ? 18 : 0
     timerEnds = Date.now() + remaining * 1000
     app.hidden = showHud
     previewRibbon.hidden = !showHud

@@ -52,6 +52,8 @@ globalThis.DuoStore = (() => {
       campaign: Array.isArray(data.campaign) ? data.campaign : [],
       weapons: Array.isArray(data.weapons) ? data.weapons : [],
       food: data.food && typeof data.food === 'object' && !Array.isArray(data.food) ? data.food : {},
+      incidents: Array.isArray(data.incidents) ? data.incidents : [],
+      heists: Array.isArray(data.heists) ? data.heists : [],
       operations: Array.isArray(data.operations) ? data.operations : [],
       receipts: Array.isArray(data.receipts) ? data.receipts : []
     }
@@ -82,13 +84,19 @@ globalThis.DuoStore = (() => {
         continue
       }
       if (data.receipts.includes(receipt)) continue
+      if (entry.incident && data.incidents.includes(entry.incident)) continue
+      if (Number.isInteger(entry.davis)) data.davis = [...new Set([...(data.davis || []), entry.davis])]
+      if (data.checkpoint?.receipt === receipt) delete data.checkpoint
       data.cash += payout.pay
       data.completed++
       data.receipts.push(receipt)
+      if (entry.incident) data.incidents.push(entry.incident)
       if (entry.campaign && !data.campaign.includes(entry.campaign)) data.campaign.push(entry.campaign)
+      if (entry.heist && !data.heists.includes(entry.heist)) data.heists.push(entry.heist)
       if (entry.operation && !data.operations.includes(entry.operation)) data.operations.push(entry.operation)
       data.lastSettlement = { name: payout.name, amount: payout.pay, completed: data.completed,
-        progress: entry.operation ? 'Operación registrada' : entry.campaign ? 'Misión de campaña registrada' : 'Contrato registrado' }
+        progress: entry.heist ? 'Atraco registrado' : entry.operation ? 'Operación registrada' : entry.campaign ? 'Misión de campaña registrada' : 'Contrato registrado' }
+      if (payout.breakdown) data.lastSettlement.breakdown = payout.breakdown
       const record = payout.rallyTime && (!data.bestRally || payout.rallyTime < data.bestRally)
       if (record) data.bestRally = payout.rallyTime
       if (save(entry.key, data)) settled.push({ key: entry.key, cash: data.cash, record, pay: payout.pay, name: payout.name })
@@ -109,5 +117,9 @@ globalThis.DuoStore = (() => {
     }
   }
 
-  return { load, save, record, settle, recover, id: randomUUID }
+  function gallery() {
+    return fs.readdirSync(root).filter(name => profilePattern.test(name)).sort().slice(0,2).map(load).filter(Boolean)
+  }
+
+  return { gallery, load, save, record, settle, recover, id: randomUUID }
 })()

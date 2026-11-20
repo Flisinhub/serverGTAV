@@ -7,3 +7,4 @@ servidor/resources/duo/pago-*.json
 respaldos/
 *.log
 dependencias/
+/servidor/resources/flota_es_local/stream/

@@ -32,6 +32,10 @@ nav [data-tab=settings]{margin-top:13px;border-top-color:var(--border)}
 .checkout{width:min(460px,calc(100% - 26px));border:1px solid #5e7255;border-radius:13px;background:#18201e;color:var(--cream);padding:24px;box-shadow:0 22px 70px #000b}
 .checkout::backdrop{background:#060909b5}
 .checkout-label{color:var(--acid);font:15px Barlow,system-ui;letter-spacing:.08em;margin-bottom:7px}
+.incident-banner{background:linear-gradient(90deg,#111a17f5,#111a1730),url('capitulo-7.jpg') center 50%/cover,#202d25}
+.incident-actions{display:flex;gap:5px;flex-wrap:wrap;justify-content:end}
+.incident-actions button{padding:5px 8px}
+.card .incident-location{min-height:0;color:#aecfd1}
 .welcome-offer h2{font-size:28px}
 #viewport{min-height:0;min-width:0;overflow:auto;scrollbar-color:#687777 var(--background);padding:21px 25px}
 .workspace-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 14px}
@@ -197,5 +201,28 @@ footer{border-top:1px solid var(--border);font-size:12px;color:#e6e5d9;min-heigh
 body.preview-hud{background:#10171a url('entrada.jpg') center/cover fixed}
 @media(max-width:680px){nav [data-tab=settings]{margin-top:0;border-top-color:transparent}}
 @media(max-width:680px){.preview-controls{flex-wrap:wrap}}
+.heist-console { grid-column:1/-1; margin:12px 0; padding:16px; border:1px solid var(--border); border-left:3px solid var(--acid); background:#151d1d; border-radius:8px }
+.heist-console header,.heist-inputs,.heist-readout { display:flex; gap:8px; align-items:center; flex-wrap:wrap }
+.heist-console header { justify-content:space-between }
+.heist-console h3 { margin:0 }
+.heist-readout { padding:0; list-style:none }
+.heist-readout li { padding:7px 10px; background:#263331; color:var(--cream); border-radius:4px }
+.heist-inputs button { min-width:6em }
+.symbol-dial { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); grid-template-rows:repeat(3,auto); width:min(100%,320px); padding:12px; box-sizing:border-box; background:radial-gradient(circle,#25342c 0 42%,#556543 43% 44%,transparent 45%) }
+.symbol-dial button { min-width:0 }
+.symbol-dial button:nth-child(1){grid-area:1/1}
+.symbol-dial button:nth-child(2){grid-area:1/3}
+.symbol-dial button:nth-child(3){grid-area:2/3}
+.symbol-dial button:nth-child(4){grid-area:3/3}
+.symbol-dial button:nth-child(5){grid-area:3/1}
+.symbol-dial button:nth-child(6){grid-area:2/1}
+.dial-center{grid-area:2/2;text-align:center;color:var(--acid)}
+.echo-matrix{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));max-width:380px}
+.echo-matrix button{min-width:0;padding:12px 4px}
+.dispatch-sheet { margin: 14px 0; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: #151d1d }
+.dispatch-sheet h3 { margin: 0; color: var(--acid) }
+.dispatch-sheet .objective-actions { display: grid; grid-template-columns: minmax(9em,2fr) 1fr 1fr auto; align-items: center; padding: 7px 0; border-top: 1px solid var(--border); font-variant-numeric: tabular-nums }
+.fleet-preferences { display: grid; gap: 8px; justify-items: start }
+@media(max-width:700px){.dispatch-sheet .objective-actions{grid-template-columns:1fr 1fr}}
 @media(max-width:900px){.dispatch{grid-column:1/-1}}
 @media(max-width:510px){.crew-list{grid-template-columns:1fr}.mission-heading{flex-wrap:wrap}.mission-summary{padding:12px}footer{flex-wrap:wrap}.preview-controls select{max-width:142px}}
